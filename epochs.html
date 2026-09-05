@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grad · витрина эпох (Quaternius)</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;background:#9ec6de}
+  #hud{position:fixed;left:12px;top:12px;color:#123;background:#ffffffd8;padding:9px 13px;
+       border-radius:10px;font-size:13px;line-height:1.45;box-shadow:0 2px 10px #0003;max-width:74vw}
+  #hud b{font-size:14px}
+  #load{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+        background:#9ec6de;color:#123;font-size:18px;z-index:5}
+  a.back{position:fixed;right:12px;top:12px;background:#ffffffd8;padding:7px 12px;border-radius:9px;
+         text-decoration:none;color:#123;font-size:13px;box-shadow:0 2px 10px #0003;z-index:6}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/jsm/"
+}}
+</script>
+</head>
+<body>
+<div id="load">Загружаю модели эпох… (сборка v2)</div>
+<script>
+// Классический (не-модульный) предохранитель: работает, даже если модуль ниже вообще не запустится.
+(function(){
+  function setLoad(t){ var el=document.getElementById('load'); if(el) el.textContent=t; }
+  addEventListener('error', function(e){
+    setLoad('Ошибка загрузки: ' + (e && (e.message || (e.target&&e.target.src) || e)) );
+  }, true);
+  addEventListener('unhandledrejection', function(e){
+    setLoad('Ошибка: ' + (e && e.reason && (e.reason.message||e.reason)) );
+  });
+  setTimeout(function(){
+    var el=document.getElementById('load');
+    if(el && /Загружаю/.test(el.textContent))
+      el.textContent='Не удалось загрузить за 25 c. Скорее всего старый кэш — жёстко обнови (Cmd+Shift+R) или открой прямую ссылку.';
+  }, 40000);
+})();
+</script>
+<a class="back" href="index.html">← к списку</a>
+<div id="hud"><b>Витрина эпох · единый стиль Quaternius</b><br>
+Лента времени слева-направо: первобыт → средневековье → современность → будущее.<br>
+Крайняя справа площадка — место для примера, сгенерированного через <b>Meshy</b>.<br>
+Тяни мышью — поворот, колесо — зум. <span id="metrics" style="opacity:.75">загрузка…</span></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const T0 = performance.now();
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9ec6de);
+scene.fog = new THREE.Fog(0x9ec6de, 120, 240);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 900);
+camera.position.set(0, 66, 142);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.target.set(0,2,0);
+controls.maxPolarAngle = Math.PI/2.12;
+
+// свет (нейтральный, без зелёного отлива снизу)
+scene.add(new THREE.HemisphereLight(0xfff4e2, 0x9a9488, 1.25));
+const sun = new THREE.DirectionalLight(0xfff0d0, 2.3);
+sun.position.set(-40, 70, 40); sun.castShadow = true;
+sun.shadow.mapSize.set(2048,2048);
+Object.assign(sun.shadow.camera,{left:-120,right:120,top:80,bottom:-80,near:1,far:260});
+sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
+scene.add(sun);
+
+// земля
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(400, 200),
+  new THREE.MeshStandardMaterial({ color:0x6f9350, roughness:1 }));
+ground.rotation.x = -Math.PI/2; ground.receiveShadow = true;
+scene.add(ground);
+
+// ——— надписи над кластерами ———
+function makeLabel(text, sub){
+  const c = document.createElement('canvas'); c.width=512; c.height=160;
+  const g = c.getContext('2d');
+  g.font='bold 52px system-ui,sans-serif'; g.textAlign='center'; g.fillStyle='#12233a';
+  g.fillText(text, 256, 60);
+  if(sub){ g.font='30px system-ui,sans-serif'; g.fillStyle='#33506e'; g.fillText(sub, 256, 108); }
+  const tex = new THREE.CanvasTexture(c); tex.anisotropy=4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:tex, transparent:true, depthTest:false}));
+  sp.scale.set(24, 7.5, 1);
+  return sp;
+}
+
+// ——— загрузка и нормализация модели ———
+const loader = new GLTFLoader();
+const cache = new Map();
+let loaded=0, failed=0;
+function loadModel(folder, name){
+  const path = `models-epochs/${folder}/${name}.glb`;
+  if(cache.has(path)) return cache.get(path);          // кэшируем ПРОМИС (без двойной загрузки)
+  const p = new Promise(res=>{
+    loader.load(path, g=>{
+      g.scene.traverse(o=>{ if(o.isMesh){o.castShadow=true;o.receiveShadow=true;} });
+      loaded++; res(g.scene);
+    }, undefined, ()=>{ failed++; res(null); });
+  });
+  cache.set(path, p);
+  return p;
+}
+// предзагрузка храма Meshy — стартуем сразу, приоритетом
+const meshyPreload = loadModel('meshy','example');
+// поставить модель: масштаб по «пятну», посадить на землю
+function place(proto, x, z, footprint, {yaw=null, keepTall=false, yLift=0, tint=null, glow=null, yScale=1}={}){
+  if(!proto) return null;
+  const o = proto.clone(true);
+  if(tint!=null||glow!=null) o.traverse(m=>{ if(m.isMesh){ m.material=m.material.clone();
+    if(tint!=null) m.material.color=new THREE.Color(tint);
+    if(m.material.emissive) m.material.emissive=new THREE.Color(glow!=null?glow:0x101f3a); } });
+  const box = new THREE.Box3().setFromObject(o);
+  const size = new THREE.Vector3(); box.getSize(size);
+  // нормируем по НАИБОЛЬШЕМУ размеру (иначе тонкие-высокие столбы/колонны раздувает в великанов)
+  const dim = Math.max(size.x, size.y, size.z) || 1;
+  const s = footprint / dim;
+  o.scale.setScalar(s);
+  if(yScale!==1) o.scale.y *= yScale;     // вытянуть вверх (небоскрёбы будущего)
+  const box2 = new THREE.Box3().setFromObject(o);
+  o.position.set(x, -box2.min.y + yLift, z);
+  o.rotation.y = yaw!=null ? yaw : Math.random()*Math.PI*2;
+  scene.add(o);
+  return o;
+}
+
+// генератор позиций «по спирали» внутри кластера
+function spiral(n, step){
+  const pts=[[0,0]]; let x=0,z=0,d=1;
+  while(pts.length<n){
+    for(let i=0;i<d;i++){x+=step; pts.push([x,z]); if(pts.length>=n)break;}
+    for(let i=0;i<d;i++){z+=step; pts.push([x,z]); if(pts.length>=n)break;}
+    d++;
+    for(let i=0;i<d;i++){x-=step; pts.push([x,z]); if(pts.length>=n)break;}
+    for(let i=0;i<d;i++){z-=step; pts.push([x,z]); if(pts.length>=n)break;}
+    d++;
+  }
+  return pts.slice(0,n);
+}
+
+// ——— описание эпох ———
+const EPOCHS = [
+  { cx:-60, folder:'prehistoric', label:'Первобыт', sub:'~4000 до н.э.', pad:0x7c8a5a,
+    structures:['Tent','Tent','Tent','Tent','Tent'], footS:5,
+    decor:['Bonfire','WoodLog','CommonTree_1','CommonTree_2','CommonTree_3','PineTree_1','PineTree_2','Rock_1','Rock_2','Rock_3','Bush_1','Bush_2','Wheat'], footD:3.4 },
+  { cx:-30, folder:'medieval', label:'Средневековье', sub:'', pad:0x8a7f5a,
+    structures:['House_1','House_2','House_3','House_4','Inn','Blacksmith','Mill','Well','Bell_Tower','Stable'], footS:6,
+    decor:['MarketStand_1','MarketStand_2','Cart','Hay'], footD:3.4 },
+  { cx:0, folder:'modern', label:'Современность', sub:'город XX–XXI вв.', pad:0x6b7280,
+    structures:['Building2_Large','Building3_Big','Building4','Building1_Small','Building2_Small','Building3_Big','Building4'], footS:9,
+    decor:['Street_4Way','Street_Straight','Street_Curve','Streetlight_Single','TrafficLight'], footD:5 },
+  { cx:30, folder:'future', label:'Будущее', sub:'неоновый мегаполис', pad:0x1c2436, tint:0x2b3f66, yStretch:2.6, glowDecor:0x36e0ff,
+    structures:['Building2_Large','Building1_Small','Building2_Small','Building3_Big','Building4','Building1_Small','Building2_Large','Building2_Small'], footS:8,
+    decor:['Sign_1','Sign_2','Sign_3','Sign_1','Sign_2','Antenna_1','Antenna_2','Light_Street_1'], footD:5 },
+];
+
+async function buildEpoch(e){
+  // площадка-диск
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(15, 40),
+    new THREE.MeshStandardMaterial({ color:e.pad, roughness:1 }));
+  pad.rotation.x=-Math.PI/2; pad.position.set(e.cx, 0.02, 0); pad.receiveShadow=true;
+  scene.add(pad);
+  // надпись
+  const lab = makeLabel(e.label, e.sub); lab.position.set(e.cx, 15, -13); scene.add(lab);
+
+  // структуры по спирали в центре (шаг = размер, чтобы не налезали)
+  const sPos = spiral(e.structures.length, Math.max(6, e.footS*0.95));
+  const sProtos = await Promise.all(e.structures.map(n=>loadModel(e.folder,n)));
+  sProtos.forEach((p,i)=>{ const [dx,dz]=sPos[i]; place(p, e.cx+dx, dz, e.footS, {yLift:e.fly||0, tint:e.tint, yScale:e.yStretch||1}); });
+
+  // декор кольцом снаружи
+  const dProtos = await Promise.all(e.decor.map(n=>loadModel(e.folder,n)));
+  dProtos.forEach((p,i)=>{
+    const a = i/e.decor.length * Math.PI*2 + 0.3;
+    const rr = 10 + Math.random()*3.2;
+    place(p, e.cx+Math.cos(a)*rr, Math.sin(a)*rr, e.footD, {glow:e.glowDecor});
+  });
+}
+
+// ——— площадка Meshy (пример) ———
+async function buildMeshy(){
+  const cx = 56;
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(14, 40),
+    new THREE.MeshStandardMaterial({ color:0x9a8f6a, roughness:1 }));
+  pad.rotation.x=-Math.PI/2; pad.position.set(cx,0.02,0); pad.receiveShadow=true; scene.add(pad);
+  const mlab = makeLabel('Пример Meshy','античный храм'); mlab.position.set(cx,16,-12); scene.add(mlab);
+
+  // храм: используем предзагрузку; при любой беде — яркий короб с подписью (а не пустая площадка)
+  let ok = false;
+  try {
+    const real = await meshyPreload;
+    if(real){
+      real.traverse(o=>{ if(o.isMesh){ o.material = new THREE.MeshStandardMaterial({ color:0xd9c48f, roughness:0.9 }); } });
+      const placed = place(real, cx, 0, 14, {});
+      ok = !!placed;
+    }
+  } catch(e){ ok = false; }
+  if(!ok){
+    const box = new THREE.Mesh(new THREE.BoxGeometry(8,10,8),
+      new THREE.MeshStandardMaterial({ color:0xff8a3d }));
+    box.position.set(cx,5,0); box.castShadow=true; scene.add(box);
+    const flab = makeLabel('храм не загрузился',''); flab.position.set(cx,15,0); scene.add(flab);
+  }
+}
+
+// стрелка-подпись «время →» на земле
+function timeArrow(){
+  const l = makeLabel('◀ раньше    время    позже ▶','');
+  l.position.set(-3, 1.2, 26); l.scale.set(64, 9, 1); scene.add(l);
+}
+
+function finishLoad(note){
+  const el=document.getElementById('load'); if(el) el.remove();
+  const m=document.getElementById('metrics');
+  const ms=Math.round(performance.now()-T0);
+  if(m) m.textContent=`загрузка: ${ms} мс · моделей: ${loaded}${failed?(' · не нашлось: '+failed):''}${note?(' · '+note):''} · FPS: …`;
+}
+// предохранитель: даже если что-то зависло — через 25 с показать сцену, а не крутиться вечно
+const watchdog = setTimeout(()=>finishLoad('часть моделей не догрузилась — показываю что есть'), 40000);
+Promise.all([ ...EPOCHS.map(buildEpoch), buildMeshy() ])
+  .then(()=>{ clearTimeout(watchdog); timeArrow(); finishLoad(); })
+  .catch(e=>{ clearTimeout(watchdog); timeArrow(); finishLoad('ошибка: '+e); });
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+let _f=0,_t=performance.now();
+(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene,camera);
+  _f++; const n=performance.now();
+  if(n-_t>500){ const fps=Math.round(_f*1000/(n-_t)); _f=0; _t=n;
+    const m=document.getElementById('metrics'); if(m) m.textContent=m.textContent.replace(/FPS:.*/,'FPS: '+fps); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,251 @@
+<meta name="robots" content="noindex, nofollow"><title>Дерево наук — макет (Генезис)</title>
+<style>
+  :root{
+    --bg:#efe6d2; --panel:#f6f0e2; --card:#fffdf7; --ink:#2b2114; --muted:#6f6555; --line:#cdbf9f;
+    --accent:#b9862b; --war:#c25a38; --eco:#5a9146; --know:#3f79bd; --trade:#c2932f;
+    --shadow:0 5px 14px #00000016;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#141b26; --panel:#1b2431; --card:#232f3f; --ink:#e9eff8; --muted:#93a3b8; --line:#33465c;
+    --accent:#e0b256; --war:#e07351; --eco:#74b45c; --know:#5e97d6; --trade:#dcb055; --shadow:0 6px 16px #0000004d;}}
+  :root[data-theme="light"]{
+    --bg:#efe6d2; --panel:#f6f0e2; --card:#fffdf7; --ink:#2b2114; --muted:#6f6555; --line:#cdbf9f;
+    --accent:#b9862b; --war:#c25a38; --eco:#5a9146; --know:#3f79bd; --trade:#c2932f; --shadow:0 5px 14px #00000016;}
+  :root[data-theme="dark"]{
+    --bg:#141b26; --panel:#1b2431; --card:#232f3f; --ink:#e9eff8; --muted:#93a3b8; --line:#33465c;
+    --accent:#e0b256; --war:#e07351; --eco:#74b45c; --know:#5e97d6; --trade:#dcb055; --shadow:0 6px 16px #0000004d;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;line-height:1.35}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 14px 60px}
+  .bar{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px 11px}
+  .bar-in{max-width:1012px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .title{font-family:Georgia,serif;font-size:20px;font-weight:700;margin:0;display:flex;align-items:center;gap:9px}
+  .flask{width:20px;height:22px;color:var(--accent)}
+  .rate{font-size:13px;color:var(--muted)} .rate b{color:var(--know);font-variant-numeric:tabular-nums}
+  .spacer{flex:1}
+  .x{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
+  .note{max-width:1012px;margin:9px auto 0;font-size:12px;color:var(--muted)}
+  .heads{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:9px 0;background:var(--bg);box-shadow:0 6px 14px -8px #0006}
+  .head{border-radius:9px;padding:7px 6px;text-align:center;font-weight:700;font-size:13px;color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;border:1px solid #0002}
+  .head.war{background:var(--war)} .head.eco{background:var(--eco)} .head.know{background:var(--know)} .head.trade{background:var(--trade)}
+  .tree{position:relative}
+  .rails{position:absolute;inset:0;display:grid;grid-template-columns:repeat(4,1fr);pointer-events:none;z-index:0}
+  .rail{justify-self:center;width:4px;border-radius:2px}
+  .rail.war{background:color-mix(in srgb,var(--war) 38%,transparent)} .rail.eco{background:color-mix(in srgb,var(--eco) 38%,transparent)}
+  .rail.know{background:color-mix(in srgb,var(--know) 38%,transparent)} .rail.trade{background:color-mix(in srgb,var(--trade) 38%,transparent)}
+  .era{position:relative;z-index:1}
+  .era-head{display:flex;align-items:center;gap:12px;margin:15px 0 11px}
+  .era-head::before,.era-head::after{content:'';height:1px;background:var(--line);flex:1}
+  .era-name{font-family:Georgia,serif;font-weight:700;font-size:13.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);white-space:nowrap}
+  .lanes{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;align-items:start}
+  .cell{display:flex;flex-direction:column;gap:9px}
+  .node{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--nc,var(--line));border-radius:10px;padding:8px 10px 8px;box-shadow:var(--shadow);transition:transform .1s}
+  .node:hover{transform:translateY(-2px)}
+  .node.war{--nc:var(--war)} .node.eco{--nc:var(--eco)} .node.know{--nc:var(--know)} .node.trade{--nc:var(--trade)}
+  .n-top{display:flex;align-items:center;gap:6px}
+  .n-ico{font-size:17px;line-height:1}
+  .n-name{font-weight:700;font-size:13px;letter-spacing:.1px}
+  .n-hint{font-size:11px;color:var(--muted);margin-top:4px}
+  .n-hint i{opacity:.8}
+  .node.pick{position:relative;border-color:var(--accent);box-shadow:0 0 0 1.5px var(--accent),var(--shadow)}
+  .node.pick::after{content:'выбрать';position:absolute;top:-8px;right:8px;font-size:9.5px;font-weight:700;color:#2a1c05;background:var(--accent);padding:1px 7px;border-radius:9px}
+  @media (prefers-reduced-motion:reduce){.node{transition:none}}
+  @media (max-width:640px){.heads,.lanes,.rails{grid-template-columns:repeat(2,1fr)}.rail.know,.rail.trade{display:none}}
+</style>
+
+<div class="bar">
+  <div class="bar-in">
+    <h1 class="title"><svg class="flask" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.7" y="2.1" width="6.6" height="2.7" rx="1.05" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10.1 4.8v4.3L4.6 19a1.8 1.8 0 0 0 1.6 2.8h11.6a1.8 1.8 0 0 0 1.6-2.8l-5.5-9.9V4.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M7.35 13.5h9.3l2.75 5.5a1.8 1.8 0 0 1-1.6 2.8H6.2a1.8 1.8 0 0 1-1.6-2.8z" fill="currentColor" opacity=".88"/></svg> Дерево наук</h1>
+    <span class="rate">наука: <b>+1</b>/ход · один Мудрец</span>
+    <span class="spacer"></span>
+    <button class="x" title="закрыть (в игре)">✕</button>
+  </div>
+  <div class="note">Полное дерево — все <b>82 науки</b> (77 из civ + 5 перенесённых из институтов: Ремесленное дело, Гражданское строительство, Естественная история, Космическая гонка, Императив исхода). Сокращать будем потом. Раскладка по 4 веткам-темам — черновая (правь). Светятся 5 стартовых наук без предпосылок.</div>
+</div>
+
+<div class="wrap">
+  <div class="heads">
+    <div class="head war">🛡️ Военное дело</div>
+    <div class="head eco">🌾 Хозяйство</div>
+    <div class="head know">📜 Знания</div>
+    <div class="head trade">⚖️ Торговля</div>
+  </div>
+  <div class="tree">
+    <div class="rails"><div class="rail war"></div><div class="rail eco"></div><div class="rail know"></div><div class="rail trade"></div></div>
+
+    <section class="era"><div class="era-head"><span class="era-name">Древний мир</span></div><div class="lanes">
+      <div class="cell">
+        <div class="node war"><div class="n-top"><span class="n-ico">🏹</span><span class="n-name">Стрельба из лука</span></div><div class="n-hint">Лучники — первая дальняя атака.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🗡️</span><span class="n-name">Обработка бронзы</span></div><div class="n-hint">Бронзовое оружие, лагерь.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node eco pick"><div class="n-top"><span class="n-ico">⛏️</span><span class="n-name">Горное дело</span></div><div class="n-hint">Камень и руда → рудник.</div></div>
+        <div class="node eco pick"><div class="n-top"><span class="n-ico">🏺</span><span class="n-name">Гончарное дело</span></div><div class="n-hint">Обжиг глины → амбар.</div></div>
+        <div class="node eco pick"><div class="n-top"><span class="n-ico">🐄</span><span class="n-name">Скотоводство</span></div><div class="n-hint">Скот → пастбище, еда.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">💧</span><span class="n-name">Ирригация</span></div><div class="n-hint">Орошение полей.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🧱</span><span class="n-name">Каменная кладка</span></div><div class="n-hint">Стены, пирамиды.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">☸️</span><span class="n-name">Колесо</span></div><div class="n-hint">Телеги, мельница.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🔨</span><span class="n-name">Ремесленное дело</span></div><div class="n-hint">Ремёсла и мастера. <i>(из институтов)</i></div></div>
+      </div>
+      <div class="cell">
+        <div class="node know pick"><div class="n-top"><span class="n-ico">✨</span><span class="n-name">Астрология</span></div><div class="n-hint">Звёзды, вера → святилище.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">📖</span><span class="n-name">Письменность</span></div><div class="n-hint">Запись знаний → библиотека.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node trade pick"><div class="n-top"><span class="n-ico">⛵</span><span class="n-name">Мореплавание</span></div><div class="n-hint">Первые лодки → галера.</div></div>
+      </div>
+    </div></section>
+
+    <section class="era"><div class="era-head"><span class="era-name">Классика</span></div><div class="lanes">
+      <div class="cell">
+        <div class="node war"><div class="n-top"><span class="n-ico">🐎</span><span class="n-name">Верховая езда</span></div><div class="n-hint">Конница → всадник.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">⚔️</span><span class="n-name">Обработка железа</span></div><div class="n-hint">Железное оружие → мечник.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node eco"><div class="n-top"><span class="n-ico">🏗️</span><span class="n-name">Строительство</span></div><div class="n-hint">Мосты, крупные постройки.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🌊</span><span class="n-name">Инженерное дело</span></div><div class="n-hint">Акведук, катапульта.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node know"><div class="n-top"><span class="n-ico">📐</span><span class="n-name">Математика</span></div><div class="n-hint">Счёт и геометрия.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node trade"><div class="n-top"><span class="n-ico">🧭</span><span class="n-name">Небесная навигация</span></div><div class="n-hint">Навигация → гавань, маяк.</div></div>
+        <div class="node trade"><div class="n-top"><span class="n-ico">🪙</span><span class="n-name">Денежное обращение</span></div><div class="n-hint">Монеты → рынок.</div></div>
+        <div class="node trade"><div class="n-top"><span class="n-ico">🚢</span><span class="n-name">Кораблестроение</span></div><div class="n-hint">Крупные корабли.</div></div>
+      </div>
+    </div></section>
+
+    <section class="era"><div class="era-head"><span class="era-name">Средневековье</span></div><div class="lanes">
+      <div class="cell">
+        <div class="node war"><div class="n-top"><span class="n-ico">🛡️</span><span class="n-name">Военная тактика</span></div><div class="n-hint">Пикинёры.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🎯</span><span class="n-name">Механика</span></div><div class="n-hint">Арбалеты, осада.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🐴</span><span class="n-name">Стремена</span></div><div class="n-hint">Тяжёлые рыцари.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🏰</span><span class="n-name">Военная инженерия</span></div><div class="n-hint">Требушеты, инженеры.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🏯</span><span class="n-name">Замки</span></div><div class="n-hint">Замки, крепостные стены.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node eco"><div class="n-top"><span class="n-ico">🔧</span><span class="n-name">Ученичество</span></div><div class="n-hint">Мастерские, промзона.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🌉</span><span class="n-name">Контрфорс</span></div><div class="n-hint">Плотины.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node know"><div class="n-top"><span class="n-ico">🎓</span><span class="n-name">Образование</span></div><div class="n-hint">Университеты.</div></div>
+      </div>
+      <div class="cell"></div>
+    </div></section>
+
+    <section class="era"><div class="era-head"><span class="era-name">Ренессанс</span></div><div class="lanes">
+      <div class="cell">
+        <div class="node war"><div class="n-top"><span class="n-ico">💥</span><span class="n-name">Порох</span></div><div class="n-hint">Мушкеты.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🔫</span><span class="n-name">Литьё металла</span></div><div class="n-hint">Пушки, бомбарды.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🧨</span><span class="n-name">Осадная тактика</span></div><div class="n-hint">Стены Ренессанса.</div></div>
+      </div>
+      <div class="cell"></div>
+      <div class="cell">
+        <div class="node know"><div class="n-top"><span class="n-ico">📰</span><span class="n-name">Печатный станок</span></div><div class="n-hint">Печать книг, рост науки.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🔭</span><span class="n-name">Астрономия</span></div><div class="n-hint">Телескоп.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node trade"><div class="n-top"><span class="n-ico">🗺️</span><span class="n-name">Картография</span></div><div class="n-hint">Океан → каравелла.</div></div>
+        <div class="node trade"><div class="n-top"><span class="n-ico">🏭</span><span class="n-name">Массовое производство</span></div><div class="n-hint">Верфи.</div></div>
+        <div class="node trade"><div class="n-top"><span class="n-ico">🏦</span><span class="n-name">Банковское дело</span></div><div class="n-hint">Банки.</div></div>
+        <div class="node trade"><div class="n-top"><span class="n-ico">⛵</span><span class="n-name">Прямое парусн. вооружение</span></div><div class="n-hint">Фрегаты.</div></div>
+      </div>
+    </div></section>
+
+    <section class="era"><div class="era-head"><span class="era-name">Индустриальная</span></div><div class="lanes">
+      <div class="cell">
+        <div class="node war"><div class="n-top"><span class="n-ico">💣</span><span class="n-name">Баллистика</span></div><div class="n-hint">Полевые пушки.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🎖️</span><span class="n-name">Военная наука</span></div><div class="n-hint">Кавалерия, линейная пехота.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🔫</span><span class="n-name">Нарезное оружие</span></div><div class="n-hint">Рейнджеры.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node eco"><div class="n-top"><span class="n-ico">🏭</span><span class="n-name">Индустриализация</span></div><div class="n-hint">Фабрики.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🚂</span><span class="n-name">Паровой двигатель</span></div><div class="n-hint">Пар, каналы, броненосец.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🚰</span><span class="n-name">Санитария</span></div><div class="n-hint">Канализация, гигиена.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🏙️</span><span class="n-name">Гражд. строительство</span></div><div class="n-hint">Инфраструктура, небоскрёбы. <i>(из институтов)</i></div></div>
+      </div>
+      <div class="cell">
+        <div class="node know"><div class="n-top"><span class="n-ico">🔬</span><span class="n-name">Научная теория</span></div><div class="n-hint">Научный метод.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🦴</span><span class="n-name">Естественная история</span></div><div class="n-hint">Музеи, раскопки. <i>(из институтов)</i></div></div>
+      </div>
+      <div class="cell">
+        <div class="node trade"><div class="n-top"><span class="n-ico">📈</span><span class="n-name">Экономика</span></div><div class="n-hint">Биржа.</div></div>
+      </div>
+    </div></section>
+
+    <section class="era"><div class="era-head"><span class="era-name">Новое время</span></div><div class="lanes">
+      <div class="cell">
+        <div class="node war"><div class="n-top"><span class="n-ico">🏗️</span><span class="n-name">Сталь</span></div><div class="n-hint">Сталь, артиллерия.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🚗</span><span class="n-name">Двигатель внутр. сгорания</span></div><div class="n-hint">Мотор, танки.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node eco"><div class="n-top"><span class="n-ico">⚙️</span><span class="n-name">Сменные детали</span></div><div class="n-hint">Конвейер, пехота.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🛢️</span><span class="n-name">Нефтепереработка</span></div><div class="n-hint">Нефть, линкор.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">⚡</span><span class="n-name">Электричество</span></div><div class="n-hint">Электричество, субмарина.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node know"><div class="n-top"><span class="n-ico">✈️</span><span class="n-name">Авиация</span></div><div class="n-hint">Первые самолёты.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">📻</span><span class="n-name">Радио</span></div><div class="n-hint">Радио, кино.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">⚗️</span><span class="n-name">Химия</span></div><div class="n-hint">Химия.</div></div>
+      </div>
+      <div class="cell"></div>
+    </div></section>
+
+    <section class="era"><div class="era-head"><span class="era-name">Атомная</span></div><div class="lanes">
+      <div class="cell">
+        <div class="node war"><div class="n-top"><span class="n-ico">🛩️</span><span class="n-name">Передовая авиация</span></div><div class="n-hint">Истребители.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🚀</span><span class="n-name">Продвинутая баллистика</span></div><div class="n-hint">Зенитки, пулемёты.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">⚓</span><span class="n-name">Общевойсковой бой</span></div><div class="n-hint">Авианосцы.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">☢️</span><span class="n-name">Ядерное деление</span></div><div class="n-hint">Атом, АЭС.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node eco"><div class="n-top"><span class="n-ico">🧴</span><span class="n-name">Пластмасса</span></div><div class="n-hint">Пластик.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🧬</span><span class="n-name">Синтетич. материалы</span></div><div class="n-hint">Синтетика, вертолёт.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node know"><div class="n-top"><span class="n-ico">🚀</span><span class="n-name">Ракетостроение</span></div><div class="n-hint">Ракеты, космодром.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">💻</span><span class="n-name">Компьютеры</span></div><div class="n-hint">Компьютеры, дрон.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🛰️</span><span class="n-name">Космическая гонка</span></div><div class="n-hint">Космическая программа. <i>(из институтов)</i></div></div>
+      </div>
+      <div class="cell"></div>
+    </div></section>
+
+    <section class="era"><div class="era-head"><span class="era-name">Информационная</span></div><div class="lanes">
+      <div class="cell">
+        <div class="node war"><div class="n-top"><span class="n-ico">🎯</span><span class="n-name">Системы наведения</span></div><div class="n-hint">Точное наведение.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🔦</span><span class="n-name">Лазеры</span></div><div class="n-hint">Лазерное оружие.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🛡️</span><span class="n-name">Композитные материалы</span></div><div class="n-hint">Современная броня.</div></div>
+        <div class="node war"><div class="n-top"><span class="n-ico">🥷</span><span class="n-name">Малозаметность</span></div><div class="n-hint">Стелс-техника.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node eco"><div class="n-top"><span class="n-ico">🤖</span><span class="n-name">Робототехника</span></div><div class="n-hint">Роботы.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🌟</span><span class="n-name">Термоядерный синтез</span></div><div class="n-hint">Термояд.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node know"><div class="n-top"><span class="n-ico">📡</span><span class="n-name">Телекоммуникации</span></div><div class="n-hint">Связь.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🛰️</span><span class="n-name">Спутники</span></div><div class="n-hint">Спутники.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🔬</span><span class="n-name">Нанотехнологии</span></div><div class="n-hint">Нанотех.</div></div>
+      </div>
+      <div class="cell"></div>
+    </div></section>
+
+    <section class="era"><div class="era-head"><span class="era-name">Будущее</span></div><div class="lanes">
+      <div class="cell"></div>
+      <div class="cell">
+        <div class="node eco"><div class="n-top"><span class="n-ico">🏝️</span><span class="n-name">Морские поселения</span></div><div class="n-hint">Города на воде.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">🔋</span><span class="n-name">Продв. аккумуляторы</span></div><div class="n-hint">Ёмкая энергия.</div></div>
+        <div class="node eco"><div class="n-top"><span class="n-ico">💎</span><span class="n-name">Умные материалы</span></div><div class="n-hint">Самонастройка.</div></div>
+      </div>
+      <div class="cell">
+        <div class="node know"><div class="n-top"><span class="n-ico">🧠</span><span class="n-name">Продвинутый ИИ</span></div><div class="n-hint">Сильный ИИ.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🦾</span><span class="n-name">Кибернетика</span></div><div class="n-hint">Человек+машина.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🔮</span><span class="n-name">Прогностич. системы</span></div><div class="n-hint">Предсказание.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🌌</span><span class="n-name">Внеземная миссия</span></div><div class="n-hint">Полёт к звёздам.</div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">🚀</span><span class="n-name">Императив исхода</span></div><div class="n-hint">Переселение к звёздам. <i>(из институтов)</i></div></div>
+        <div class="node know"><div class="n-top"><span class="n-ico">♾️</span><span class="n-name">Технологии будущего</span></div><div class="n-hint">Повторяемая, финал.</div></div>
+      </div>
+      <div class="cell"></div>
+    </div></section>
+
+  </div>
+</div>
