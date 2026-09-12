@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grad · тест текстур на настоящей карте</title>
+<link rel="icon" href="data:,">
+<style>
+  html,body{margin:0;background:#182022;font-family:system-ui,sans-serif;color:#e7ecef}
+  h1{font-size:16px;margin:14px 16px 4px}
+  p.note{margin:0 16px 14px;font-size:12.5px;color:#9fb0b8;max-width:900px;line-height:1.5}
+  .row{margin:0 12px 22px}
+  .row h2{font-size:13px;margin:0 4px 8px;color:#cfe0e6;font-weight:600}
+  .cells{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  .cell.baseline{outline:2px solid #ffd97a55}
+  .cell{background:#0e1416;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px #0006}
+  .cell .vp{width:100%;aspect-ratio:4/3;position:relative}
+  .cell canvas{display:block;width:100%!important;height:100%!important}
+  .cell .cap{padding:8px 10px 10px;font-size:12px;line-height:1.45;color:#c7d2d6}
+  .cell .cap b{color:#fff;display:block;font-size:12.5px;margin-bottom:2px}
+  a.back{position:fixed;right:12px;top:12px;background:#ffffff14;padding:7px 12px;border-radius:9px;
+         text-decoration:none;color:#e7ecef;font-size:13px}
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/jsm/" } }
+</script>
+</head>
+<body>
+<a class="back" href="./index.html">← карта</a>
+<h1>Тест текстур на настоящей карте (тот же рельеф, что в игре)</h1>
+<p class="note">Каждая сцена — полноразмерный кусок реальной карты (то же озеро у центра, тот же горный
+хребет по краям, та же формула высот, что в <code>index.html</code>). Крутить/зумить мышью можно
+любую сцену. В каждой строке меняется только ОДНА вещь — вода / горы / трава — остальное одинаково,
+чтобы сравнение было честным.</p>
+
+<div class="row">
+  <h2>Вода — озеро (у центра) и добавленная для теста извилистая речка</h2>
+  <div class="cells">
+    <div class="cell baseline"><div class="vp" id="water0"></div>
+      <div class="cap"><b>0. Как сейчас в игре</b>Плоская вода без спецэффектов — эталон для сравнения.</div></div>
+    <div class="cell"><div class="vp" id="water2"></div>
+      <div class="cap"><b>1. Геометрические волны (шейдер)</b>Поверхность воды реально в мелкую рябь, блик от солнца бегает по волнам.</div></div>
+    <div class="cell"><div class="vp" id="water3"></div>
+      <div class="cap"><b>2. Normal-map блеск (без геометрии)</b>Плоская вода, но карта нормалей даёт бегущий блеск дёшево по производительности.</div></div>
+    <div class="cell"><div class="vp" id="water4"></div>
+      <div class="cap"><b>3. Комбо: волны + normal-map</b>И крупная геометрическая рябь, и мелкий бегущий блеск поверх неё — максимально «живая» вода из двух приёмов сразу.</div></div>
+  </div>
+</div>
+<p class="note" style="margin-top:-8px">Проверил <code>index.html</code> — там речки нет, только один круглый водоём (POND). Извилистое русло на этой странице добавлено ТОЛЬКО для теста (в боевую игру не переносилось) — крути камеру ближе к дальнему краю карты, чтобы её увидеть целиком.</p>
+
+<div class="row">
+  <h2>Горы — те самые пологие горы (не конусы), только высокая часть рельефа</h2>
+  <div class="cells">
+    <div class="cell baseline"><div class="vp" id="mtn0"></div>
+      <div class="cap"><b>0. Твой выбор (эталон)</b>Вариант 2 — normal-map блеск. С ним сравниваются новые попытки.</div></div>
+    <div class="cell"><div class="vp" id="mtn1"></div>
+      <div class="cap"><b>1. Крапинка на скальной части</b>Тот же плавный рельеф, но в зоне камень/снег добавлен мелкий шум яркости — рябая, не «одним цветом».</div></div>
+    <div class="cell"><div class="vp" id="mtn2"></div>
+      <div class="cap"><b>2. Каменный рельеф-блеск (normal map)</b>Силуэт горы остаётся тем же гладким, но добавлена мелкая карта нормалей ТОЛЬКО в скальной зоне — свет ловит неровности камня без изменения формы.</div></div>
+    <div class="cell"><div class="vp" id="mtn3"></div>
+      <div class="cap"><b>3. Среднее между 0 и 1</b>Тот же normal-map блеск (как в 0) + вдвое более слабая крапинка (вполовину слабее, чем в 1) — немного цветовой ряби, но не так пестро.</div></div>
+  </div>
+</div>
+
+<div class="row">
+  <h2>Трава — вся равнинная часть карты</h2>
+  <div class="cells">
+    <div class="cell baseline"><div class="vp" id="grass0"></div>
+      <div class="cap"><b>0. Твой выбор (эталон)</b>Вариант 2 — пятна+рябь. С ним сравниваются новые попытки.</div></div>
+    <div class="cell"><div class="vp" id="grass1"></div>
+      <div class="cap"><b>1. Усиленный шум</b>Тот же приём, что уже есть в игре, но амплитуда в разы больше — заметная зернистость.</div></div>
+    <div class="cell"><div class="vp" id="grass2"></div>
+      <div class="cap"><b>2. Два слоя шума (пятна + рябь)</b>Крупные мягкие пятна светлее/темнее плюс мелкий шум поверх — трава неровная, не «одним цветом».</div></div>
+    <div class="cell"><div class="vp" id="grass3"></div>
+      <div class="cap"><b>3. Штрихи-травинки</b>Множество коротких чёрточек разного наклона прямо в текстуре земли — читается как «травинки».</div></div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const clock = new THREE.Clock();
+const cells = [];
+function hashN(s){ const v=Math.sin(s*127.1)*43758.5453; return v-Math.floor(v); }
+function clamp255(v){ return v<0?0:v>255?255:v; }
+
+// ============ РЕАЛЬНЫЙ РЕЛЬЕФ — скопировано 1:1 из site/index.html (тот же SIZE/формулы/пик горы) ============
+const SIZE=84, HALF=SIZE/2;
+const TEX=512;          // как в игре — раньше было 256, из-за чего при близком зуме текстура камня размывалась
+const TX_SCALE = TEX/256; // во сколько раз TEX больше "исходных" 256 — на это домножаем размеры пятен/штрихов в пикселях текстуры, чтобы их РЕАЛЬНЫЙ размер на карте не менялся
+const SEG=170;
+const POND={x:3,z:0}, WATER=-1.5, PLAY=30;
+const MTN_PEAKS=[
+  {x:7,   z:18,  a:7.2, r:3.6}, {x:3.5, z:15.5,a:5.4, r:3.0}, {x:10.5,z:20.5,a:6.0, r:3.2},
+  {x:6,   z:22,  a:4.4, r:2.7}, {x:11,  z:16,  a:4.0, r:2.6},
+  {x:-19, z:1,   a:6.4, r:3.4}, {x:-22.5,z:4,  a:4.8, r:2.8}, {x:-15.5,z:-2, a:5.2, r:2.9},
+  {x:-20, z:-4,  a:4.0, r:2.5}, {x:-16, z:3.5, a:3.6, r:2.4},
+];
+// речки в боевой игре сейчас нет (проверено в index.html — там только один круглый POND).
+// Для теста воды добавлена ТОЛЬКО здесь извилистая речка-русло (riverCenterZ/riverDip), в
+// реальную игру не переносилась.
+function riverCenterZ(x){ return 0.55*x - 6 + 6*Math.sin(x*0.15) + 4*Math.sin(x*0.05+1); }
+function riverDip(x,z){
+  const d = z - riverCenterZ(x);
+  return -1.7*Math.exp(-(d*d)/(2*1.5*1.5));
+}
+function hAt(x,z){
+  let h = 1.15*Math.sin(x*0.13)*Math.cos(z*0.11)
+        + 0.75*Math.sin(x*0.07+1.5)*Math.sin(z*0.09+0.5)
+        + 0.35*Math.sin(x*0.24+0.3)*Math.cos(z*0.20-0.4);
+  const rim=Math.max(0,(Math.max(Math.abs(x),Math.abs(z))-PLAY)/12);
+  h += rim*rim*5.4*(0.9+0.15*Math.sin(x*0.3)+0.15*Math.cos(z*0.27));
+  h -= 3.4*Math.exp(-Math.pow(Math.hypot(x-POND.x,z-POND.z)/6.6,2));
+  for(const p of MTN_PEAKS) h += p.a*Math.exp(-Math.pow(Math.hypot(x-p.x,z-p.z)/p.r,1.2));
+  h += riverDip(x,z);
+  return h;
+}
+function wetAt(x,z){
+  let w=0.5 + 0.32*Math.sin(x*0.08+1.3)*Math.cos(z*0.09-0.6)
+            + 0.18*Math.sin(x*0.19-0.4) + 0.12*Math.cos(z*0.16+0.9);
+  return Math.min(1,Math.max(0,w));
+}
+const ssf=(a,b,x)=>{ const t=Math.min(1,Math.max(0,(x-a)/(b-a))); return t*t*(3-2*t); };
+
+const _sand=new THREE.Color(0xcdb98a),_g1=new THREE.Color(0x6f9f49),_g2=new THREE.Color(0x8fbb5f),
+      _rock=new THREE.Color(0x8a8f96),_snow=new THREE.Color(0xeef2f6),
+      _forest=new THREE.Color(0x3f6b33),_swamp=new THREE.Color(0x4fa652),_tundra=new THREE.Color(0xb3b8ac);
+const _c=new THREE.Color();
+function groundColor(wx,wz,h){   // как в игре (без болотных пятен по гексам — тут не нужно для теста)
+  const wet=wetAt(wx,wz);
+  if(h<-0.5)      _c.copy(_sand).lerp(_g1, ssf(-1.5,-0.5,h));
+  else if(h<1.2)  _c.copy(_g1).lerp(_g2, ssf(-0.5,1.2,h));
+  else if(h<3.0)  _c.copy(_g2).lerp(_rock, ssf(1.2,3.0,h));
+  else            _c.copy(_rock).lerp(_snow, ssf(5.6,8.2,h));
+  const midBand=ssf(-0.4,0.0,h)*ssf(2.4,1.8,h);
+  _c.lerp(_forest, 0.72*ssf(0.5,0.66,wet)*midBand);
+  _c.lerp(_sand,   0.7*ssf(0.36,0.18,wet)*ssf(1.9,1.1,h));
+  const low=ssf(0.05,-0.25,h);
+  const swF=low*ssf(0.64,0.72,wet);
+  _c.lerp(_swamp, 0.85*swF);
+  _c.lerp(_sand,   0.6*low*ssf(0.6,0.4,wet));
+  if(h>2.4) _c.lerp(_tundra, 0.5*ssf(2.4,3.0,h)*(1-ssf(3.0,3.6,h)));
+  return _c;
+}
+const hashrnd=(s)=>{const x=Math.sin(s*127.1+13.7)*43758.5;return x-Math.floor(x);};
+
+// ---- считаем один раз: высоты/маски по пикселю текстуры земли, базовые цвета ----
+const cw = SIZE/TEX;
+const hArr = new Float32Array(TEX*TEX);
+const rockAmtArr = new Float32Array(TEX*TEX);   // 0 трава .. 1 скала/снег
+const grassAmtArr = new Float32Array(TEX*TEX);  // 0 вода/скала .. 1 равнина
+const baseColorU8 = new Uint8ClampedArray(TEX*TEX*3);
+for(let gy=0; gy<TEX; gy++) for(let gx=0; gx<TEX; gx++){
+  const i=gy*TEX+gx;
+  const wx=(gx+0.5)*cw-HALF, wz=(gy+0.5)*cw-HALF;
+  const h=hAt(wx,wz); hArr[i]=h;
+  const col=groundColor(wx,wz,h);
+  const n=(hashrnd(i)-0.5)*10;
+  baseColorU8[i*3]  = col.r*255+n*0.5;
+  baseColorU8[i*3+1]= col.g*255+n;
+  baseColorU8[i*3+2]= col.b*255+n*0.4;
+  const rockAmt = ssf(1.2,3.0,h);
+  rockAmtArr[i] = rockAmt;
+  const landAmt = ssf(WATER+0.05, WATER+0.35, h);
+  grassAmtArr[i] = landAmt*(1-rockAmt);
+}
+
+// ---- геометрия рельефа и воды — общие для всех сцен (only построить один раз) ----
+const terrainGeo = new THREE.PlaneGeometry(SIZE,SIZE,SEG,SEG); terrainGeo.rotateX(-Math.PI/2);
+{ const p=terrainGeo.attributes.position; for(let i=0;i<p.count;i++) p.setY(i, hAt(p.getX(i), p.getZ(i))); }
+terrainGeo.computeVertexNormals();
+const waterGeo = new THREE.PlaneGeometry(SIZE,SIZE);
+
+function freshGroundImageData(){
+  const cv = document.createElement('canvas'); cv.width=cv.height=TEX;
+  const cx = cv.getContext('2d');
+  const img = cx.createImageData(TEX,TEX);
+  for(let i=0;i<TEX*TEX;i++){
+    img.data[i*4]=baseColorU8[i*3]; img.data[i*4+1]=baseColorU8[i*3+1]; img.data[i*4+2]=baseColorU8[i*3+2]; img.data[i*4+3]=255;
+  }
+  return {cv,cx,img};
+}
+
+function makeCell(id, {camPos=[0,44,50], target=[0,0,0]}={}){
+  const host = document.getElementById(id);
+  const w = host.clientWidth || 380, h = host.clientHeight || 290;
+  const renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));
+  renderer.setSize(w,h);
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.06;
+  host.appendChild(renderer.domElement);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xbcd8ee);
+  scene.fog = new THREE.Fog(0xbcd8ee, 80, 175);
+  const camera = new THREE.PerspectiveCamera(46, w/h, 0.1, 400);
+  camera.position.set(...camPos);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.maxPolarAngle = Math.PI/2.15;
+  controls.minDistance = 12; controls.maxDistance = 130;
+  controls.target.set(...target); controls.update();
+  scene.add(new THREE.HemisphereLight(0xdff0ff, 0x54703e, 0.85));
+  const sun = new THREE.DirectionalLight(0xfff2d8, 1.5); sun.position.set(28,44,20);
+  sun.castShadow = true; sun.shadow.mapSize.set(1024,1024);
+  const sd=55; Object.assign(sun.shadow.camera,{left:-sd,right:sd,top:sd,bottom:-sd,near:1,far:150});
+  scene.add(sun);
+  window.addEventListener('resize', ()=>{
+    const w2=host.clientWidth, h2=host.clientHeight;
+    if(!w2||!h2) return;
+    renderer.setSize(w2,h2); camera.aspect=w2/h2; camera.updateProjectionMatrix();
+  });
+  const rec = {renderer,scene,camera,controls,update:null};
+  cells.push(rec);
+  return rec;
+}
+
+function addTerrain(scene, {groundEnhance, mtnNormalMap}={}){
+  const {cv,cx,img} = freshGroundImageData();
+  if(groundEnhance) groundEnhance(img.data, cx);
+  cx.putImageData(img,0,0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+  const matOpts = {map:tex, roughness:1};
+  if(mtnNormalMap){ matOpts.normalMap = mtnNormalMap; matOpts.normalScale = new THREE.Vector2(0.85,0.85); }
+  const terrain = new THREE.Mesh(terrainGeo, new THREE.MeshStandardMaterial(matOpts));
+  terrain.receiveShadow = true; terrain.castShadow = true;
+  scene.add(terrain);
+  return terrain;
+}
+
+function addPlainWater(scene){
+  const water = new THREE.Mesh(waterGeo, new THREE.MeshStandardMaterial({color:0x3f86c4, roughness:0.2, metalness:0.3, transparent:true, opacity:0.9}));
+  water.rotation.x = -Math.PI/2; water.position.y = WATER; scene.add(water);
+  return water;
+}
+
+// ============================================================ ВОДА (эталон + 3 варианта) ============================================================
+
+function waterV0(){
+  const rec = makeCell('water0');
+  addTerrain(rec.scene);
+  addPlainWater(rec.scene);
+  return rec;
+}
+
+function waterV2(){
+  const rec = makeCell('water2'); const {scene} = rec;
+  addTerrain(scene);
+  const geo = new THREE.PlaneGeometry(SIZE,SIZE,220,220);
+  geo.rotateX(-Math.PI/2);
+  const mat = new THREE.ShaderMaterial({
+    transparent:true,
+    uniforms:{
+      uTime:{value:0},
+      uColor:{value:new THREE.Color(0x4a95cf)},
+      uColorDeep:{value:new THREE.Color(0x275a8c)},
+      uLightDir:{value:new THREE.Vector3(0.5,0.8,0.3).normalize()},
+      uCamPos:{value:new THREE.Vector3()},
+    },
+    vertexShader:`
+      uniform float uTime;
+      varying vec3 vNormalW;
+      varying vec3 vPosW;
+      float waveH(vec2 p, float t){
+        return 0.05*sin(1.1*p.x + t*1.3)
+             + 0.035*sin(1.7*p.y - t*1.7 + p.x*0.5)
+             + 0.018*sin(2.3*(p.x+p.y)*0.6 + t*2.1);
+      }
+      void main(){
+        vec3 pos = position;
+        float t = uTime;
+        float eps = 0.08;
+        float h  = waveH(pos.xz, t);
+        float hx = waveH(pos.xz + vec2(eps,0.0), t);
+        float hz = waveH(pos.xz + vec2(0.0,eps), t);
+        pos.y += h;
+        vec3 va = vec3(eps, hx-h, 0.0);
+        vec3 vb = vec3(0.0, hz-h, eps);
+        vec3 n = normalize(cross(vb, va));
+        vNormalW = normalize(mat3(modelMatrix) * n);
+        vPosW = (modelMatrix * vec4(pos,1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos,1.0);
+      }
+    `,
+    fragmentShader:`
+      uniform vec3 uColor; uniform vec3 uColorDeep; uniform vec3 uLightDir; uniform vec3 uCamPos;
+      varying vec3 vNormalW; varying vec3 vPosW;
+      void main(){
+        vec3 N = normalize(vNormalW);
+        vec3 L = normalize(uLightDir);
+        vec3 V = normalize(uCamPos - vPosW);
+        float diff = max(dot(N,L), 0.0);
+        vec3 H = normalize(L+V);
+        float spec = pow(max(dot(N,H),0.0), 70.0);
+        vec3 base = mix(uColorDeep, uColor, 0.5+0.5*diff);
+        vec3 col = base*(0.35+0.65*diff) + vec3(1.0)*spec*0.95;
+        gl_FragColor = vec4(col, 0.92);
+      }
+    `,
+  });
+  const m = new THREE.Mesh(geo, mat); m.position.y = WATER; scene.add(m);
+  rec.update = (t, camera)=>{ mat.uniforms.uTime.value=t; mat.uniforms.uCamPos.value.copy(camera.position); };
+  return rec;
+}
+
+function hash2(x,y){ const s=Math.sin(x*127.1+y*311.7)*43758.5453; return s-Math.floor(s); }
+function valueNoise2(x,y){
+  const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi;
+  const sm=t=>t*t*(3-2*t);
+  const u=sm(xf), v=sm(yf);
+  const a=hash2(xi,yi), b=hash2(xi+1,yi), c=hash2(xi,yi+1), d=hash2(xi+1,yi+1);
+  return a + (b-a)*u + (c-a)*v + (a-b-c+d)*u*v;
+}
+function fbm2(x,y,octaves){
+  let total=0, amp=0.55, freq=1;
+  for(let o=0;o<octaves;o++){ total += valueNoise2(x*freq, y*freq)*amp; amp*=0.52; freq*=2.13; }
+  return total;
+}
+function makeNormalMapFromHeight(size, heightFn, strength){
+  const h = new Float32Array(size*size);
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++) h[y*size+x] = heightFn(x,y);
+  const cv = document.createElement('canvas'); cv.width=cv.height=size;
+  const cx = cv.getContext('2d'); const img = cx.createImageData(size,size);
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++){
+    const xm=Math.max(0,x-1), xp=Math.min(size-1,x+1), ym=Math.max(0,y-1), yp=Math.min(size-1,y+1);
+    const dx=(h[y*size+xp]-h[y*size+xm])*strength;
+    const dy=(h[yp*size+x]-h[ym*size+x])*strength;
+    let nx=-dx, ny=-dy, nz=1;
+    const len=Math.hypot(nx,ny,nz); nx/=len; ny/=len; nz/=len;
+    const i=(y*size+x)*4;
+    img.data[i]  =(nx*0.5+0.5)*255;
+    img.data[i+1]=(ny*0.5+0.5)*255;
+    img.data[i+2]=(nz*0.5+0.5)*255;
+    img.data[i+3]=255;
+  }
+  cx.putImageData(img,0,0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+  return tex;
+}
+
+function waterV3(){
+  const rec = makeCell('water3'); const {scene,renderer} = rec;
+  addTerrain(scene);
+  const size=512;
+  const nmap = makeNormalMapFromHeight(size, (x,y)=>fbm2(x/size*40, y/size*40, 5), 1.6);
+  nmap.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const mat = new THREE.MeshStandardMaterial({
+    color:0x3f86c4, roughness:0.22, metalness:0.3, transparent:true, opacity:0.9,
+    normalMap:nmap, normalScale:new THREE.Vector2(0.5,0.5),
+  });
+  const m = new THREE.Mesh(waterGeo, mat);
+  m.rotation.x = -Math.PI/2; m.position.y = WATER; scene.add(m);
+  rec.update = (t)=>{ nmap.offset.set(t*0.012, t*0.007); };
+  return rec;
+}
+
+function waterV4(){
+  const rec = makeCell('water4'); const {scene,renderer} = rec;
+  addTerrain(scene);
+  const geo = new THREE.PlaneGeometry(SIZE,SIZE,220,220);
+  geo.rotateX(-Math.PI/2);
+  const size=512;
+  const nmap = makeNormalMapFromHeight(size, (x,y)=>fbm2(x/size*40, y/size*40, 5), 1.6);
+  nmap.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const mat = new THREE.ShaderMaterial({
+    transparent:true,
+    uniforms:{
+      uTime:{value:0},
+      uColor:{value:new THREE.Color(0x4a95cf)},
+      uColorDeep:{value:new THREE.Color(0x275a8c)},
+      uLightDir:{value:new THREE.Vector3(0.5,0.8,0.3).normalize()},
+      uCamPos:{value:new THREE.Vector3()},
+      uNormalMap:{value:nmap},
+      uNormalOffset:{value:new THREE.Vector2()},
+    },
+    vertexShader:`
+      uniform float uTime;
+      varying vec3 vNormalW;
+      varying vec3 vPosW;
+      varying vec2 vUv;
+      float waveH(vec2 p, float t){
+        return 0.05*sin(1.1*p.x + t*1.3)
+             + 0.035*sin(1.7*p.y - t*1.7 + p.x*0.5)
+             + 0.018*sin(2.3*(p.x+p.y)*0.6 + t*2.1);
+      }
+      void main(){
+        vec3 pos = position;
+        float t = uTime;
+        float eps = 0.08;
+        float h  = waveH(pos.xz, t);
+        float hx = waveH(pos.xz + vec2(eps,0.0), t);
+        float hz = waveH(pos.xz + vec2(0.0,eps), t);
+        pos.y += h;
+        vec3 va = vec3(eps, hx-h, 0.0);
+        vec3 vb = vec3(0.0, hz-h, eps);
+        vec3 n = normalize(cross(vb, va));
+        vNormalW = normalize(mat3(modelMatrix) * n);
+        vPosW = (modelMatrix * vec4(pos,1.0)).xyz;
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos,1.0);
+      }
+    `,
+    fragmentShader:`
+      uniform vec3 uColor; uniform vec3 uColorDeep; uniform vec3 uLightDir; uniform vec3 uCamPos;
+      uniform sampler2D uNormalMap; uniform vec2 uNormalOffset;
+      varying vec3 vNormalW; varying vec3 vPosW; varying vec2 vUv;
+      void main(){
+        vec3 nmap = texture2D(uNormalMap, vUv*14.0 + uNormalOffset).xyz*2.0-1.0;
+        vec3 N = normalize(vNormalW + vec3(nmap.xy*0.55, 0.0));
+        vec3 L = normalize(uLightDir);
+        vec3 V = normalize(uCamPos - vPosW);
+        float diff = max(dot(N,L), 0.0);
+        vec3 H = normalize(L+V);
+        float spec = pow(max(dot(N,H),0.0), 90.0);
+        vec3 base = mix(uColorDeep, uColor, 0.5+0.5*diff);
+        vec3 col = base*(0.35+0.65*diff) + vec3(1.0)*spec*1.05;
+        gl_FragColor = vec4(col, 0.92);
+      }
+    `,
+  });
+  const m = new THREE.Mesh(geo, mat); m.position.y = WATER; scene.add(m);
+  rec.update = (t, camera)=>{
+    mat.uniforms.uTime.value=t; mat.uniforms.uCamPos.value.copy(camera.position);
+    mat.uniforms.uNormalOffset.value.set(t*0.012, t*0.007);
+  };
+  return rec;
+}
+
+// ============================================================ ГОРЫ (эталон + 3 варианта) — только скальная зона рельефа ============================================================
+
+function mtnV0(){
+  // эталон = твой текущий выбор (вариант 2, normal-map блеск), а не пустой рельеф —
+  // чтобы новые попытки сравнивались с тем, что уже понравилось, а не с "как в игре".
+  const rec = makeCell('mtn0');
+  const nmap = makeNormalMapFromHeight(TEX, (x,y)=>{
+    const i=y*TEX+x; return (fbm2(x/TEX*22, y/TEX*22, 4)-0.5) * rockAmtArr[i];
+  }, 2.2);
+  addTerrain(rec.scene, {mtnNormalMap:nmap});
+  addPlainWater(rec.scene);
+  return rec;
+}
+
+function mtnV1(){
+  const {scene} = makeCell('mtn1');
+  addTerrain(scene, {groundEnhance:(data)=>{
+    for(let i=0;i<TEX*TEX;i++){
+      const amt=rockAmtArr[i]; if(amt<=0.01) continue;
+      const speck=(hashN(i*3.7+11.3)-0.5)*46*amt;
+      data[i*4]  =clamp255(data[i*4]  +speck*0.9);
+      data[i*4+1]=clamp255(data[i*4+1]+speck*0.9);
+      data[i*4+2]=clamp255(data[i*4+2]+speck*0.75);
+    }
+  }});
+  addPlainWater(scene);
+}
+
+function mtnV2(){
+  const {scene} = makeCell('mtn2');
+  const nmap = makeNormalMapFromHeight(TEX, (x,y)=>{
+    const i=y*TEX+x; return (fbm2(x/TEX*22, y/TEX*22, 4)-0.5) * rockAmtArr[i];
+  }, 2.2);
+  addTerrain(scene, {mtnNormalMap:nmap});
+  addPlainWater(scene);
+}
+
+// вариант "текстура камня" убран по прямой просьбе (не получился, дважды). Вместо него —
+// среднее между вариантом 0 (normal-map, без цвета) и вариантом 1 (только крапинка):
+// тот же normal-map-блеск + вдвое слабее крапинка сверху.
+function mtnV3(){
+  const {scene} = makeCell('mtn3');
+  const nmap = makeNormalMapFromHeight(TEX, (x,y)=>{
+    const i=y*TEX+x; return (fbm2(x/TEX*22, y/TEX*22, 4)-0.5) * rockAmtArr[i];
+  }, 2.2);
+  addTerrain(scene, {mtnNormalMap:nmap, groundEnhance:(data)=>{
+    for(let i=0;i<TEX*TEX;i++){
+      const amt=rockAmtArr[i]; if(amt<=0.01) continue;
+      const speck=(hashN(i*3.7+11.3)-0.5)*20*amt;   // вдвое слабее, чем в варианте 1 (там было *46)
+      data[i*4]  =clamp255(data[i*4]  +speck*0.9);
+      data[i*4+1]=clamp255(data[i*4+1]+speck*0.9);
+      data[i*4+2]=clamp255(data[i*4+2]+speck*0.75);
+    }
+  }});
+  addPlainWater(scene);
+}
+
+// ============================================================ ТРАВА (эталон + 3 варианта) — вся равнинная часть ============================================================
+
+// пятна+рябь — общая функция, чтобы эталон (grassV0, "твой выбор") и grassV2 были идентичны
+function grassPatchesEnhance(data){
+  const pc=document.createElement('canvas'); pc.width=pc.height=TEX;
+  const pcx=pc.getContext('2d');
+  const NB=Math.round(256*256/2600);  // фиксированное число пятен на площадь карты, не зависит от TEX
+  for(let i=0;i<NB;i++){
+    const x=Math.random()*TEX, y=Math.random()*TEX, r=(7+Math.random()*20)*TX_SCALE;
+    const g=pcx.createRadialGradient(x,y,0,x,y,r);
+    const dark=Math.random()<0.5;
+    g.addColorStop(0, dark?'rgba(50,80,35,0.55)':'rgba(170,205,115,0.5)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    pcx.fillStyle=g; pcx.beginPath(); pcx.arc(x,y,r,0,Math.PI*2); pcx.fill();
+  }
+  const pimg=pcx.getImageData(0,0,TEX,TEX).data;
+  for(let i=0;i<TEX*TEX;i++){
+    const amt=grassAmtArr[i]*(pimg[i*4+3]/255); if(amt<=0.01) continue;
+    data[i*4]  = data[i*4]  *(1-amt) + pimg[i*4]  *amt;
+    data[i*4+1]= data[i*4+1]*(1-amt) + pimg[i*4+1]*amt;
+    data[i*4+2]= data[i*4+2]*(1-amt) + pimg[i*4+2]*amt;
+  }
+  for(let i=0;i<TEX*TEX;i++){
+    const amt=grassAmtArr[i]; if(amt<=0.01) continue;
+    const n=(Math.random()-0.5)*24*amt;
+    data[i*4]=clamp255(data[i*4]+n*0.6); data[i*4+1]=clamp255(data[i*4+1]+n); data[i*4+2]=clamp255(data[i*4+2]+n*0.4);
+  }
+}
+
+function grassV0(){
+  // эталон = твой текущий выбор (вариант 2, пятна+рябь), а не пустой рельеф.
+  const rec = makeCell('grass0');
+  addTerrain(rec.scene, {groundEnhance: grassPatchesEnhance});
+  addPlainWater(rec.scene);
+  return rec;
+}
+
+function grassV1(){
+  const {scene} = makeCell('grass1');
+  addTerrain(scene, {groundEnhance:(data)=>{
+    for(let i=0;i<TEX*TEX;i++){
+      const amt=grassAmtArr[i]; if(amt<=0.01) continue;
+      const n=(Math.random()-0.5)*46*amt;
+      data[i*4]  =clamp255(data[i*4]  +n*0.6);
+      data[i*4+1]=clamp255(data[i*4+1]+n);
+      data[i*4+2]=clamp255(data[i*4+2]+n*0.4);
+    }
+  }});
+  addPlainWater(scene);
+}
+
+function grassV2(){
+  const {scene} = makeCell('grass2');
+  addTerrain(scene, {groundEnhance: grassPatchesEnhance});
+  addPlainWater(scene);
+}
+
+function grassV3(){
+  const {scene} = makeCell('grass3');
+  addTerrain(scene, {groundEnhance:(data, cx)=>{
+    cx.putImageData(new ImageData(data, TEX, TEX), 0,0);   // блики-штрихи рисуем поверх уже готовой картинки
+    const N = Math.round(256*256*0.16);  // фиксированная плотность на площадь карты, не зависит от TEX
+    let drawn=0, tries=0;
+    while(drawn<N && tries<N*3){
+      tries++;
+      const gx=Math.floor(Math.random()*TEX), gy=Math.floor(Math.random()*TEX);
+      const i=gy*TEX+gx;
+      if(grassAmtArr[i] < 0.55) continue;
+      const len=(2+Math.random()*3.4)*TX_SCALE;
+      const ang=Math.PI/2+(Math.random()-0.5)*1.0;
+      const shade=Math.random();
+      const g1=130+shade*90;
+      cx.strokeStyle=`rgba(${(40+shade*40)|0},${g1|0},${(35+shade*30)|0},${0.45+Math.random()*0.35})`;
+      cx.lineWidth=0.9*TX_SCALE;
+      cx.beginPath(); cx.moveTo(gx,gy); cx.lineTo(gx+Math.cos(ang)*len, gy-Math.sin(ang)*len); cx.stroke();
+      drawn++;
+    }
+    const drawnImg = cx.getImageData(0,0,TEX,TEX);
+    data.set(drawnImg.data);
+  }});
+  addPlainWater(scene);
+}
+
+waterV0(); waterV2(); waterV3(); waterV4();
+mtnV0(); mtnV1(); mtnV2(); mtnV3();
+grassV0(); grassV1(); grassV2(); grassV3();
+
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  for(const c of cells){
+    c.controls.update();
+    if(c.update) c.update(t, c.camera);
+    c.renderer.render(c.scene, c.camera);
+  }
+}
+animate();
+</script>
+</body>
+</html>

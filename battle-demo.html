@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Демо боя — два варианта</title>
+<!-- ДЕМО (25.08): выбор вида боя для механики «набеги и дружина».
+     Слева вариант А «пыль и цифры», справа Б «выпады фигурок». Крутить мышью, зум колесом. -->
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#bcd8ee;font-family:system-ui,sans-serif}
+  .lbl{position:fixed;top:14px;color:#122;background:#ffffffd8;padding:8px 14px;border-radius:10px;
+       font-size:15px;font-weight:600;box-shadow:0 2px 10px #0003}
+  #la{left:16%}  #lb{right:16%}
+  #hint{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);color:#122;background:#ffffffc8;
+        padding:6px 12px;border-radius:9px;font-size:12px}
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/jsm/" } }
+</script>
+</head>
+<body>
+<div class="lbl" id="la">Вариант А — пыль и цифры</div>
+<div class="lbl" id="lb">Вариант Б — выпады фигурок</div>
+<div id="hint">камера — мышью, зум — колесом; бой повторяется по кругу</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.12;
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xbcd8ee);
+scene.fog=new THREE.Fog(0xd3d7e2,60,160);
+scene.add(new THREE.HemisphereLight(0xdfe8f2,0x4e5a3a,1.05));
+const sun=new THREE.DirectionalLight(0xffe8c0,1.9); sun.position.set(26,38,-14);
+sun.castShadow=true; sun.shadow.mapSize.set(2048,2048);
+const sc=30; Object.assign(sun.shadow.camera,{left:-sc,right:sc,top:sc,bottom:-sc,near:1,far:120});
+sun.shadow.bias=-0.0004; scene.add(sun);
+const cam=new THREE.PerspectiveCamera(44,innerWidth/innerHeight,0.1,400);
+cam.position.set(0,15,21);
+const controls=new OrbitControls(cam,renderer.domElement);
+controls.enableDamping=true; controls.target.set(0,0.6,0); controls.screenSpacePanning=false;
+
+let s=13; const rr=()=>{ s=(s*16807)%2147483647; return (s-1)/2147483646; };
+
+// ── земля: две лужайки с лёгким рельефом и гекс-сеткой, как в игре ──
+function patch(cx){
+  const g=new THREE.PlaneGeometry(19,15,26,20); g.rotateX(-Math.PI/2);
+  const p=g.attributes.position;
+  for(let i=0;i<p.count;i++) p.setY(i,(rr()-0.5)*0.22);
+  g.computeVertexNormals();
+  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0x679a4e,roughness:0.95,flatShading:true}));
+  m.position.x=cx; m.receiveShadow=true; scene.add(m);
+  const hx=new THREE.Group(); const R=1.05;
+  for(let row=-4;row<=4;row++)for(let col=-5;col<=5;col++){
+    const x=col*R*1.5, z=row*R*Math.sin(Math.PI/3)*2+(col%2?R*Math.sin(Math.PI/3):0);
+    if(Math.abs(x)>8.6||Math.abs(z)>6.6) continue;
+    const pts=[]; for(let k=0;k<=6;k++){ const a=Math.PI/180*(60*k+30);
+      pts.push(new THREE.Vector3(x+R*Math.cos(a),0.02,z+R*Math.sin(a))); }
+    hx.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.28})));
+  }
+  hx.position.x=cx; scene.add(hx);
+  for(let i=0;i<5;i++){ const t=new THREE.Group();
+    const tr=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.09,0.5,5),new THREE.MeshStandardMaterial({color:0x6b4f2e,roughness:1}));
+    tr.position.y=0.25; t.add(tr);
+    const cr=new THREE.Mesh(new THREE.ConeGeometry(0.5,1.15,6),new THREE.MeshStandardMaterial({color:0x3f6b33,roughness:0.95,flatShading:true}));
+    cr.position.y=1.0; t.add(cr);
+    t.position.set(cx+(rr()-0.5)*16,(0),(rr()<0.5?-1:1)*(5+rr()*1.5));
+    t.traverse(o=>{o.castShadow=true;}); scene.add(t);
+  }
+}
+patch(-11); patch(11);
+
+// ── воин-ЧЕЛОВЕЧЕК (вердикт «где нормальные человеки?»): голова, туловище, руки-ноги,
+//    шлем/шапка, щит и копьё; конечности — отдельные меши, анимируются в цикле ──
+const MAT=(c,extra)=>new THREE.MeshStandardMaterial(Object.assign({color:c,roughness:0.9,flatShading:true},extra||{}));
+function warrior(kind){   // kind: 'our' | 'raid'
+  const our=kind==='our';
+  const skin=MAT(0xd9a878), tunic=MAT(our?0x3b6fc4:0x4a3b2c), dark=MAT(0x2e2620);
+  const g=new THREE.Group(); const u={};
+  // ноги (шарнир — у бедра: геометрия смещена вниз от точки вращения)
+  const legG=()=>{ const l=new THREE.Mesh(new THREE.BoxGeometry(0.13,0.42,0.15),MAT(0x6b5232)); l.geometry.translate(0,-0.21,0); return l; };
+  u.legL=legG(); u.legL.position.set(-0.10,0.42,0); g.add(u.legL);
+  u.legR=legG(); u.legR.position.set( 0.10,0.42,0); g.add(u.legR);
+  // туловище-рубаха (чуть шире к плечам) + пояс
+  const torso=new THREE.Mesh(new THREE.CylinderGeometry(0.155,0.19,0.46,6),tunic);
+  torso.position.y=0.66; g.add(torso);
+  const belt=new THREE.Mesh(new THREE.CylinderGeometry(0.185,0.19,0.06,6),dark);
+  belt.position.y=0.47; g.add(belt);
+  // голова + шлем (у наших — бронзовый с гребнем, у налётчиков — меховая шапка)
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.135,7,6),skin); head.position.y=1.02; g.add(head);
+  if(our){ const helm=new THREE.Mesh(new THREE.SphereGeometry(0.145,7,5,0,Math.PI*2,0,Math.PI*0.55),MAT(0xb08d3e,{metalness:0.4,roughness:0.5}));
+    helm.position.y=1.05; g.add(helm);
+  } else { const hat=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.16,0.14,6),MAT(0x5a4534)); hat.position.y=1.12; g.add(hat); }
+  // руки (шарнир — у плеча); правая держит копьё, левая у наших — щит
+  const armG=()=>{ const a=new THREE.Mesh(new THREE.BoxGeometry(0.10,0.40,0.12),tunic); a.geometry.translate(0,-0.17,0); return a; };
+  u.armR=armG(); u.armR.position.set( 0.24,0.86,0); g.add(u.armR);
+  u.armL=armG(); u.armL.position.set(-0.24,0.86,0); g.add(u.armL);
+  const hand=new THREE.Mesh(new THREE.SphereGeometry(0.055,5,4),skin); hand.position.y=-0.38; u.armR.add(hand);
+  const spear=new THREE.Group();
+  const shaft=new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,1.5,4),MAT(0x8a6b40)); spear.add(shaft);
+  const tip=new THREE.Mesh(new THREE.ConeGeometry(0.05,0.17,4),MAT(0xb9c0c8,{metalness:0.5,roughness:0.4}));
+  tip.position.y=0.83; spear.add(tip);
+  spear.position.set(0,-0.38,0.03); u.armR.add(spear); u.spear=spear;
+  if(our){ const shield=new THREE.Mesh(new THREE.CylinderGeometry(0.21,0.21,0.045,8),MAT(0x8a5a2b));
+    shield.rotation.z=Math.PI/2; shield.position.set(-0.07,-0.3,0.02); u.armL.add(shield);
+    const boss=new THREE.Mesh(new THREE.SphereGeometry(0.055,6,5),MAT(0xb9c0c8,{metalness:0.5,roughness:0.4}));
+    boss.position.set(-0.10,-0.3,0.02); u.armL.add(boss);
+  } else { const axe=new THREE.Mesh(new THREE.BoxGeometry(0.16,0.10,0.03),MAT(0x9aa0a8,{metalness:0.4,roughness:0.5}));
+    axe.position.set(0,-0.42,0.10); u.armL.add(axe); }
+  g.traverse(o=>{ o.castShadow=true; });
+  g.userData.limbs=u; g.scale.setScalar(1.25);   // «крупнее и заметнее» — воин выше жителя примерно вдвое
+  return g;
+}
+// анимации человечка: шаг / замах / стойка
+function poseWalk(w,t,ph){ const u=w.userData.limbs; const s=Math.sin(t*5+ph);
+  u.legL.rotation.x=0.55*s; u.legR.rotation.x=-0.55*s;
+  u.armL.rotation.x=-0.4*s; u.armR.rotation.x=0.4*s;
+  w.position.y=Math.abs(Math.cos(t*5+ph))*0.035; }
+function poseStrike(w,t,ph){ const u=w.userData.limbs; const p=(t*1.6+ph)%2;
+  const k=p<0.25?p/0.25:p<0.5?1-(p-0.25)/0.25:0;      // резкий выпад — плавный возврат
+  u.armR.rotation.x=-1.35*k; u.legL.rotation.x=0.28*k; u.legR.rotation.x=-0.2*k;
+  u.armL.rotation.x=0.25*k; w.position.y=0; }
+function poseIdle(w){ const u=w.userData.limbs;
+  u.legL.rotation.x=u.legR.rotation.x=0; u.armL.rotation.x=u.armR.rotation.x=0; w.position.y=0; }
+function banner(col,ragged){
+  const g=new THREE.Group();
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.045,0.045,2.6,5),new THREE.MeshStandardMaterial({color:0x6e5233,roughness:1}));
+  pole.position.y=1.3; pole.castShadow=true; g.add(pole);
+  let geo;
+  if(ragged){ const sh=new THREE.Shape();
+    sh.moveTo(0,0); sh.lineTo(1.05,0); sh.lineTo(0.9,-0.18); sh.lineTo(1.0,-0.36); sh.lineTo(0.8,-0.5);
+    sh.lineTo(0.55,-0.34); sh.lineTo(0.3,-0.55); sh.lineTo(0.12,-0.3); sh.lineTo(0,-0.42); sh.closePath();
+    geo=new THREE.ShapeGeometry(sh);
+  } else geo=new THREE.PlaneGeometry(1.1,0.62).translate(0.55,-0.31,0);
+  const flag=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:col,roughness:0.9,side:THREE.DoubleSide}));
+  flag.position.set(0.05,2.55,0); flag.castShadow=true; g.add(flag); g.userData.flag=flag;
+  return g;
+}
+function squad(kind,flagCol,ragged,n){
+  const g=new THREE.Group(); const men=[];
+  const bn=banner(flagCol,ragged); bn.position.set(0,0,-0.4); g.add(bn); g.userData.banner=bn;
+  const POS=[[0,0.6],[-0.65,0.1],[0.65,0.1],[-0.35,-0.55],[0.35,-0.55]];
+  for(let i=0;i<n;i++){ const w=warrior(kind); w.position.set(POS[i][0],0,POS[i][1]); g.add(w); men.push(w); }
+  g.userData.men=men; scene.add(g); return g;
+}
+const OURFLAG=0x3b82c4, RAIDFLAG=0x7a1f1f;
+
+// ── ВАРИАНТ А: сходятся, пыль, тающие цифры, проигравший растворяется ──
+const aOur=squad('our',OURFLAG,false,4), aRaid=squad('raid',RAIDFLAG,true,4);
+aRaid.rotation.y=Math.PI;
+const dust=new THREE.Group();
+for(let i=0;i<9;i++){ const d=new THREE.Mesh(new THREE.IcosahedronGeometry(0.34+rr()*0.3,0),
+  new THREE.MeshBasicMaterial({color:0xb9b3a4,transparent:true,opacity:0.55}));
+  d.position.set((rr()-0.5)*1.7,0.35+rr()*0.9,(rr()-0.5)*1.2); d.userData.ph=rr()*6.28; dust.add(d); }
+dust.position.set(-11,0,0); dust.visible=false; scene.add(dust);
+function numSprite(){ const cv=document.createElement('canvas'); cv.width=128; cv.height=64;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv),transparent:true}));
+  sp.scale.set(1.7,0.85,1); sp.userData.cv=cv;
+  sp.userData.set=(txt,color)=>{ const c=cv.getContext('2d'); c.clearRect(0,0,128,64);
+    c.font='bold 44px system-ui'; c.textAlign='center'; c.textBaseline='middle';
+    c.lineWidth=7; c.strokeStyle='rgba(20,25,32,0.85)'; c.strokeText(txt,64,34);
+    c.fillStyle=color; c.fillText(txt,64,34); sp.material.map.needsUpdate=true; };
+  scene.add(sp); return sp; }
+const numOur=numSprite(), numRaid=numSprite();
+
+// ── ВАРИАНТ Б: пары делают выпады, налётчики падают по одному ──
+const bOur=squad('our',OURFLAG,false,4), bRaid=squad('raid',RAIDFLAG,true,4);
+bRaid.rotation.y=Math.PI;
+
+const T=12;   // длительность цикла, с
+const clock=new THREE.Clock();
+function ease(a,b,t){ t=Math.max(0,Math.min(1,t)); t=t*t*(3-2*t); return a+(b-a)*t; }
+function anim(){
+  requestAnimationFrame(anim);
+  const t=clock.getElapsedTime()%T; window.__t=clock.getElapsedTime();
+  // — А —
+  const meet=1.05;
+  const mA=ease(6.2,meet,t/3);                    // 0–3 c: марш
+  aOur.position.set(-11,0,mA); aRaid.position.set(-11,0,-mA);
+  const fight=t>3&&t<9, over=t>=9;
+  dust.visible=fight;
+  if(fight){ dust.children.forEach(d=>{ const k=1+0.25*Math.sin(t*6+d.userData.ph);
+      d.scale.setScalar(k); d.rotation.y=t*2+d.userData.ph; }); }
+  const sOur=Math.round(ease(24,15,(t-3)/6)), sRaid=Math.round(ease(18,0,(t-3)/6));
+  numOur.position.set(-11.9,2.9,0); numRaid.position.set(-10.1,2.9,0);
+  numOur.visible=numRaid.visible=(t>2.2&&t<9.6);
+  if(numOur.visible){ numOur.userData.set(String(sOur),'#9cc4ff'); numRaid.userData.set(String(sRaid),'#ff9c8a'); }
+  const fade=over?Math.max(0,1-(t-9)/1.6):1;      // налётчики растворяются
+  aRaid.traverse(o=>{ if(o.material){ o.material.transparent=true; o.material.opacity=fade; } });
+  aRaid.visible=fade>0.02;
+  [aOur,aRaid].forEach((sq,si)=>sq.userData.men.forEach((w,i)=>{   // марш → удары в пыли → стойка
+    if(t<3) poseWalk(w,t,i+si*2); else if(fight) poseStrike(w,t,i*0.7+si); else poseIdle(w); }));
+  // — Б —
+  const mB=ease(6.2,1.5,t/3);
+  bOur.position.set(11,0,mB); bRaid.position.set(11,0,-mB);
+  const bf=t>3&&t<10.5;
+  bOur.userData.men.forEach((w,i)=>{
+    if(t<3) poseWalk(w,t,i); else if(bf) poseStrike(w,t,i*0.9); else poseIdle(w); });
+  bRaid.userData.men.forEach((w,i)=>{
+    const die=4.4+i*1.7;                          // падают по одному
+    if(t>die){ const k=Math.min(1,(t-die)/0.8);
+      poseIdle(w);
+      w.rotation.x=-1.5*k; w.position.y=-0.15*k;
+      const op=t>die+1.2?Math.max(0,1-(t-die-1.2)/1.2):1;
+      w.traverse(o=>{ if(o.material){ o.material.transparent=true; o.material.opacity=op; } });
+      w.visible=op>0.02;
+    } else { w.rotation.x=0; w.visible=true;
+      if(t<3) poseWalk(w,t,i+1); else poseStrike(w,t,i*1.1+0.5);
+      w.traverse(o=>{ if(o.material){ o.material.opacity=1; } }); }
+  });
+  const rf=t>10.5?Math.max(0,1-(t-10.5)/1.2):1;   // знамя налётчиков падает в конце
+  bRaid.userData.banner.rotation.x=-1.4*(1-rf);
+  // флаги колышутся
+  [aOur,aRaid,bOur,bRaid].forEach((sq,i)=>{ const f=sq.userData.banner.userData.flag;
+    f.rotation.y=0.18*Math.sin(t*2.2+i); });
+  controls.update();
+  renderer.render(scene,cam);
+}
+anim();
+addEventListener('resize',()=>{ cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); });
+window.__ready=true; window.__cam={camera:cam,controls};
+</script>
+</body>
+</html>

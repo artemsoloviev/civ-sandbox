@@ -1,0 +1,159 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow"><style>body{margin:0;background:#2f6b2a}canvas{display:block}</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script></head><body>
+<script type="module">
+import * as THREE from 'three';
+// ---- минимальное окружение, как в игре ----
+const HEX=2.0, SQ3=Math.sqrt(3);
+const axialToWorld=(q,r)=>[HEX*1.5*q, HEX*SQ3*(r+q/2)];
+const worldToAxial=(x,z)=>{const q=(2/3*x)/HEX, r=(-1/3*x+SQ3/3*z)/HEX;
+  let cx=q,cz=r,cy=-cx-cz; let rx=Math.round(cx),ry=Math.round(cy),rz=Math.round(cz);
+  const dx=Math.abs(rx-cx),dy=Math.abs(ry-cy),dz=Math.abs(rz-cz);
+  if(dx>dy&&dx>dz) rx=-ry-rz; else if(dy>dz) ry=-rx-rz; else rz=-rx-ry; return [rx,rz];};
+const HN=[[1,0],[-1,0],[0,1],[0,-1],[1,-1],[-1,1]];
+const key=(q,r)=>q+','+r;
+const hexCorners=(cx,cz)=>{const p=[];for(let i=0;i<6;i++){const a=Math.PI/180*(60*i);p.push([cx+HEX*Math.cos(a),cz+HEX*Math.sin(a)]);}return p;};
+const hAt=()=>0;                              // ПЛОСКАЯ земля — чтобы рельеф не путал замер
+const B_WATER=0,B_MOUNTAIN=6;
+const biomeAt=()=>1;                          // всюду луг: зона идеально круглая
+const zoneGrp=new THREE.Group();
+function cityBodyRings(cap){ return Math.max(0, Math.min(4, Math.floor((cap.size-3)/3))); }
+function capitalCtrlRadius(cap){ return cityBodyRings(cap)+4; }
+function drawZoneOf(cap, col){
+  const [cq,cr]=worldToAxial(cap.x,cap.z);
+  const R=capitalCtrlRadius(cap);
+  // Кольца строим ПО ОСЯМ, а не по массиву hexes: иначе зона обрезается о невидимый край игрового
+  // поля (PLAY=30) при том, что земля видна до 84 — на скриншоте это выглядело «срезано снизу».
+  const inZone=new Map();                                     // "q,r" → {q,r,x,z,depth}; depth 0 = сам край
+  for(let dq=-R;dq<=R;dq++) for(let dr=Math.max(-R,-dq-R); dr<=Math.min(R,-dq+R); dr++){
+    const q=cq+dq, r=cr+dr, d=(Math.abs(dq)+Math.abs(dr)+Math.abs(dq+dr))/2;
+    const [x,z]=axialToWorld(q,r);
+    const b=biomeAt(x,z);
+    if(b===B_MOUNTAIN || b===B_WATER) continue;               // зона ОБТЕКАЕТ гору и воду — там держава не властна
+    inZone.set(key(q,r), {q,r,x,z,depth:R-d});
+  }
+  // Заливки клетки БОЛЬШЕ НЕТ (2026-07-10). Пользователь: красить шестиугольник целиком не надо —
+  // нужен узкий градиент, приклеенный к самой линии границы и тающий внутрь за две её толщины.
+
+  // 1) СОБИРАЕМ ГРАНИЧНЫЕ РЁБРА. Ребро граничное, если сосед за ним вне зоны.
+  //    Для каждого храним внутреннюю нормаль — куда «внутрь державы» отступать полосе.
+  const W=0.14;                                                // полуширина линии; толщина линии = 2W
+  const FADE=8*W;                                              // растушёвка внутрь = четыре толщины линии (2026-07-10: вдвое шире)
+  const EDGE=[[0,1],[3,4],[1,2],[4,5],[5,0],[2,3]];            // рёбра гекса по индексу соседа в HN
+  const edges=[];                                              // {ax,az,bx,bz,nx,nz}
+  inZone.forEach(h=>{ const cor=hexCorners(h.x,h.z);
+    HN.forEach(([dq,dr],k)=>{ if(inZone.has(key(h.q+dq,h.r+dr))) return;
+      const A=cor[EDGE[k][0]], B=cor[EDGE[k][1]];
+      let nx=h.x-(A[0]+B[0])/2, nz=h.z-(A[1]+B[1])/2;          // от середины ребра к центру гекса = внутрь
+      const nl=Math.hypot(nx,nz)||1; nx/=nl; nz/=nl;
+      edges.push({ax:A[0],az:A[1],bx:B[0],bz:B[1],nx,nz}); }); });
+  if(!edges.length) return;
+
+  // 2) СШИВАЕМ РЁБРА В КОНТУРЫ и СГЛАЖИВАЕМ (2026-07-10, просьба пользователя: линия границы
+  //    была ломаной из шестиугольных рёбер — «рваная»; градиент рядом смотрелся плавным).
+  //    Контуров может быть несколько: внешний + дырки вокруг гор и озёр внутри зоны.
+  //    У каждой вершины контура держим ВНУТРЕННЮЮ нормаль (сумма нормалей смежных рёбер),
+  //    она сглаживается вместе с точкой — поэтому лента и градиент лежат на одной кривой.
+  const vk=(x,z)=>`${Math.round(x*100)},${Math.round(z*100)}`;
+  const norms=new Map(), vpos=new Map(), adj=new Map();
+  const addV=(x,z,nx,nz,ei)=>{ const k=vk(x,z);
+    const o=norms.get(k); if(o){ o.nx+=nx; o.nz+=nz; } else { norms.set(k,{nx,nz}); vpos.set(k,[x,z]); }
+    if(!adj.has(k)) adj.set(k,[]); adj.get(k).push(ei); };
+  edges.forEach((e,i)=>{ addV(e.ax,e.az,e.nx,e.nz,i); addV(e.bx,e.bz,e.nx,e.nz,i); });
+  const vnorm=k=>{ const s=norms.get(k), l=Math.hypot(s.nx,s.nz)||1; return [s.nx/l, s.nz/l]; };
+
+  const usedE=new Array(edges.length).fill(false);
+  const loops=[];                                              // каждый: {pts:[{x,z,nx,nz}], closed}
+  for(let i=0;i<edges.length;i++){
+    if(usedE[i]) continue;
+    usedE[i]=true;
+    const kStart=vk(edges[i].ax,edges[i].az);
+    let cur=vk(edges[i].bx,edges[i].bz), closed=false;
+    const chain=[kStart, cur];
+    for(let guard=0; guard<edges.length+2; guard++){
+      const nxt=(adj.get(cur)||[]).find(j=>!usedE[j]);
+      if(nxt===undefined) break;                               // тупик: контур открытый (край карты)
+      usedE[nxt]=true;
+      const e=edges[nxt], ka=vk(e.ax,e.az), kb=vk(e.bx,e.bz);
+      const to=(ka===cur)?kb:ka;
+      if(to===kStart){ closed=true; break; }                   // кольцо сомкнулось
+      chain.push(to); cur=to;
+    }
+    if(chain.length<3) continue;
+    loops.push({ closed, pts: chain.map(k=>{ const [x,z]=vpos.get(k), [nx,nz]=vnorm(k); return {x,z,nx,nz}; }) });
+  }
+  // Чайкин: каждое звено заменяем двумя точками на 1/4 и 3/4 его длины — углы срезаются, ломаная
+  // становится кривой. Три прохода превращают шестиугольные зубцы в мягкую волну. Нормали
+  // смешиваем тем же весом, потом нормируем — иначе полоса «крутилась» бы вокруг кривой.
+  const mix=(a,b,t)=>({x:a.x+(b.x-a.x)*t, z:a.z+(b.z-a.z)*t, nx:a.nx+(b.nx-a.nx)*t, nz:a.nz+(b.nz-a.nz)*t});
+  const chaikin=(P,closed)=>{
+    const n=P.length, Q=[], lim=closed?n:n-1;
+    for(let i=0;i<lim;i++){ const a=P[i], b=P[(i+1)%n]; Q.push(mix(a,b,0.25), mix(a,b,0.75)); }
+    if(!closed){ Q.unshift(P[0]); Q.push(P[n-1]); }
+    return Q;
+  };
+  loops.forEach(L=>{
+    for(let it=0; it<3; it++) L.pts=chaikin(L.pts, L.closed);
+    L.pts.forEach(p=>{ const l=Math.hypot(p.nx,p.nz)||1; p.nx/=l; p.nz/=l; });
+  });
+
+  // 3) ПОЛОСА-ГРАДИЕНТ вдоль кривой. Прозрачность задана ПО ВЕРШИНАМ: у линии — плотно,
+  //    у внутреннего края — ноль. Видеокарта смешивает сама, поэтому переход гладкий.
+  // ВАЖНО (2026-07-10, по скрину пользователя): полоса начинается от ВНУТРЕННЕЙ КРОМКИ ЛЕНТЫ (+W),
+  // а не от осевой кривой. Раньше её плотное начало пряталось под лентой, и наружу торчала бледная
+  // внешняя половина линии — глаз читал это как «градиент съехал наружу».
+  // Цвет и плотность у кромки — те же, что у линии, поэтому переход линия→заливка бесшовный.
+  const C=new THREE.Color(col).offsetHSL(0,-0.18,-0.06), A0=0.42;   // ВЫБОР ПОЛЬЗОВАТЕЛЯ 2026-07-10: кромка почти вровень с линией (0.5) — линия и заливка сливаются в одну мягкую полосу
+  const gp=[], gc=[];
+  const yF=(x,z)=>hAt(x,z)+0.175;                              // высота сближена с лентой (0.20): меньше расхождение на наклонной камере
+  const push=(x,z,a)=>{ gp.push(x,yF(x,z),z); gc.push(C.r,C.g,C.b,a); };
+  loops.forEach(L=>{ const P=L.pts, n=P.length, lim=L.closed?n:n-1;
+    for(let i=0;i<lim;i++){ const a=P[i], b=P[(i+1)%n];
+      const aox=a.x+a.nx*W, aoz=a.z+a.nz*W, box=b.x+b.nx*W, boz=b.z+b.nz*W;          // старт: внутренний край линии
+      const aix=a.x+a.nx*(W+FADE), aiz=a.z+a.nz*(W+FADE);                            // конец: сходит на нет
+      const bix=b.x+b.nx*(W+FADE), biz=b.z+b.nz*(W+FADE);
+      push(aox,aoz,A0); push(box,boz,A0); push(bix,biz,0);
+      push(aox,aoz,A0); push(bix,biz,0);  push(aix,aiz,0);
+    } });
+  if(gp.length){
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(gp,3));
+    g.setAttribute('color',   new THREE.Float32BufferAttribute(gc,4));   // 4-й канал = прозрачность вершины
+    const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({vertexColors:true,transparent:true,
+      depthWrite:false,side:THREE.DoubleSide}));
+    m.renderOrder=6; zoneGrp.add(m);
+  }
+
+  // 4) ТОНКАЯ ЛЕНТА — сама линия границы, по ТОЙ ЖЕ сглаженной кривой, поверх градиента.
+  //    Кромки отступают от кривой на ±W вдоль нормали вершины, поэтому на изгибах нет щелей.
+  const pos=[];
+  const y=(x,z)=>hAt(x,z)+0.20;
+  const P3=(x,z)=>pos.push(x,y(x,z),z);
+  loops.forEach(L=>{ const P=L.pts, n=P.length, lim=L.closed?n:n-1;
+    for(let i=0;i<lim;i++){ const a=P[i], b=P[(i+1)%n];
+      const a1x=a.x-a.nx*W, a1z=a.z-a.nz*W, a2x=a.x+a.nx*W, a2z=a.z+a.nz*W;
+      const b1x=b.x-b.nx*W, b1z=b.z-b.nz*W, b2x=b.x+b.nx*W, b2z=b.z+b.nz*W;
+      P3(a1x,a1z); P3(a2x,a2z); P3(b1x,b1z);
+      P3(a2x,a2z); P3(b2x,b2z); P3(b1x,b1z);
+    } });
+  if(pos.length){
+    const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+    // Линия приглушена (2026-07-10): цвет державы, но тусклее — насыщенность −0.18, яркость −0.06,
+    // прозрачность 0.85→0.5. Раньше лента «резала» глаз ярче самого градиента.
+    const lc=new THREE.Color(col).offsetHSL(0,-0.18,-0.06);
+    const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({color:lc,transparent:true,opacity:0.5,depthWrite:false,side:THREE.DoubleSide}));
+    m.renderOrder=7; zoneGrp.add(m);
+  }
+}
+
+// ---- сцена: строго сверху, город в (0,0) ----
+const W=900,H=900;
+const rnd=new THREE.WebGLRenderer({antialias:true}); rnd.setSize(W,H); document.body.appendChild(rnd.domElement);
+const sc=new THREE.Scene(); sc.background=new THREE.Color(0x2f6b2a);
+const cam=new THREE.OrthographicCamera(-17,17,17,-17,0.1,100); cam.position.set(0,20,0); cam.lookAt(0,0,0); cam.up.set(0,0,-1);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(80,80), new THREE.MeshBasicMaterial({color:0x2f6b2a}));
+ground.rotation.x=-Math.PI/2; sc.add(ground);
+drawZoneOf({x:0,z:0,size:3}, 0x1f6fd0);       // столица в центре, синий цвет державы
+sc.add(zoneGrp);
+rnd.render(sc,cam);
+window.__ready=1;
+</script></body></html>
