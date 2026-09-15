@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grad · пошаговость · конец хода</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,sans-serif;background:#6f9a55}
+  #hud{position:fixed;left:12px;top:12px;color:#122;background:#ffffffd8;padding:10px 14px;
+       border-radius:11px;font-size:13px;line-height:1.5;box-shadow:0 2px 12px #0004;max-width:56vw}
+  #hud b{font-size:14px}
+  #panel{position:fixed;left:12px;bottom:12px;background:#ffffffd8;padding:10px 14px;border-radius:11px;
+         box-shadow:0 2px 12px #0004;font-size:13px;color:#122;display:flex;flex-direction:column;gap:8px;min-width:270px}
+  #panel .row{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  #panel input[type=range]{flex:1}
+  #panel button{border:0;border-radius:8px;padding:6px 12px;background:#3a7d44;color:#fff;cursor:pointer;font-size:13px}
+  #panel button.sec{background:#8a5a2b}
+  #panel button#end{padding:11px 12px;font-size:15px;font-weight:600;background:#2563a8}
+  #panel button:disabled{opacity:.5;cursor:default}
+  #turnbox{position:fixed;left:50%;top:12px;transform:translateX(-50%);background:#122e;color:#fff;
+           padding:8px 18px;border-radius:11px;font-size:15px;box-shadow:0 2px 12px #0005;z-index:6}
+  #turnbox b{font-size:19px}
+  #turnbox .st{opacity:.7;font-size:12px;margin-left:8px}
+  #board{position:fixed;right:12px;bottom:12px;background:#ffffffd8;padding:10px 13px;border-radius:11px;
+         box-shadow:0 2px 12px #0004;font-size:12.5px;color:#122;min-width:180px;line-height:1.6}
+  #board b{font-size:13px}
+  a.back{position:fixed;right:12px;top:12px;background:#ffffffd8;padding:7px 12px;border-radius:9px;
+         text-decoration:none;color:#122;font-size:13px;box-shadow:0 2px 12px #0004;z-index:6}
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.185.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<a class="back" href="index.html">← к списку</a>
+<div id="turnbox">Ход <b id="tn">0</b><span class="st" id="tstate">— мир замер, жду «конец хода»</span></div>
+<div id="hud"><b>Фундамент — время ПОШАГОВОЕ</b><br>
+Мир не «бежит» сам. Нажимаешь <b>«Конец хода»</b> → мир за ОДИН расчёт прокладывает/подтирает
+тропы и растит поселения, потом <b>замирает</b> и ждёт тебя. Это опора №1 «конституции»
+(DECISIONS §1a): так дёшево (не считаем 60 раз/сек), и есть <b>детерминизм</b> — тот же ход
+из того же зерна даёт тот же результат. Проверка: «сброс» с тем же зерном + столько же ходов
+→ карта повторится 1-в-1.</div>
+<div id="panel">
+  <button id="end">▶ Конец хода</button>
+  <div class="row"><label><input id="auto" type="checkbox"> авто-ходы подряд</label>
+    <label><input id="anim" type="checkbox" checked> показывать движение</label></div>
+  <div class="row"><span>насыщенность хода</span><input id="steps" type="range" min="40" max="360" value="120"></div>
+  <div class="row"><span>сколько людей</span><input id="count" type="range" min="10" max="180" value="90"></div>
+  <div class="row"><label><input id="show" type="checkbox" checked> показывать людей</label>
+    <label><input id="spawn" type="checkbox" checked> деревни на перекрёстках</label></div>
+  <div class="row"><span>зерно</span><input id="seed" type="number" value="1" style="width:70px">
+    <button id="reset" class="sec">сброс</button></div>
+</div>
+<div id="board"><b>Поселения</b><div id="list">…</div></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------- сеяный генератор случайности (детерминизм) ----------
+// mulberry32: из одного «зерна» всегда одна и та же цепочка чисел.
+let _s=1;
+function srand(seed){ _s = (seed>>>0) || 1; }
+function R(){ _s |= 0; _s = _s + 0x6D2B79F5 | 0;
+  let t = Math.imul(_s ^ _s>>>15, 1 | _s);
+  t = t + Math.imul(t ^ t>>>7, 61 | t) ^ t;
+  return ((t ^ t>>>14) >>> 0) / 4294967296; }
+
+// ---------- мир-«карта» ----------
+const N=150, L=60, HALF=L/2;
+const cvs=document.createElement('canvas'); cvs.width=N; cvs.height=N;
+const ctx=cvs.getContext('2d');
+const img=ctx.createImageData(N,N);
+const tramp=new Float32Array(N*N);
+const blocked=new Uint8Array(N*N);
+const grass=new Uint8Array(N*N*3);
+const hashrnd=(s)=>{const x=Math.sin(s*127.1+13.7)*43758.5;return x-Math.floor(x);};
+for(let i=0;i<N*N;i++){const n=(hashrnd(i)-0.5)*20;
+  grass[i*3]=Math.max(0,88+n*0.4); grass[i*3+1]=148+n; grass[i*3+2]=Math.max(0,70+n*0.3);}
+
+const POND={x:3,z:0,r:7};
+const cx=w=>Math.floor((w+HALF)/L*N);
+for(let gy=0;gy<N;gy++)for(let gx=0;gx<N;gx++){
+  const wx=(gx+0.5)/N*L-HALF, wz=(gy+0.5)/N*L-HALF;
+  if(Math.hypot(wx-POND.x,wz-POND.z)<POND.r) blocked[gy*N+gx]=1;
+}
+function trAt(wx,wz){const gx=cx(wx),gy=cx(wz); if(gx<0||gy<0||gx>=N||gy>=N)return 0; return tramp[gy*N+gx];}
+function blkAt(wx,wz){const gx=cx(wx),gy=cx(wz); if(gx<0||gy<0||gx>=N||gy>=N)return 1; return blocked[gy*N+gx];}
+
+// ---------- поселения ----------
+const STARTS=[[-22,-15],[21,-18],[24,15],[-20,17],[-2,-24],[-6,23]];
+let LM=[];
+function addLM(x,z,size){LM.push({x,z,size,visits:0,flow:0});}
+function stage(s){return s<1.2?'хижина':s<2.6?'деревушка':s<4.4?'деревня':'город';}
+
+// ---------- люди ----------
+let AG=[];
+function pickGoal(not){ // «ГРАВИТАЦИЯ»: тянет размер ÷ расстояние²
+  const from = (not>=0 && LM[not]) ? LM[not] : null;
+  let tot=0; const w=new Array(LM.length);
+  for(let i=0;i<LM.length;i++){
+    if(i===not){ w[i]=0; continue; }
+    const lm=LM[i];
+    let dist=8; if(from){ dist=Math.hypot(lm.x-from.x, lm.z-from.z); }
+    w[i]= lm.size / (dist*dist + 25);
+    tot+=w[i];
+  }
+  if(tot<=0) return (not+1)%LM.length;
+  let r=R()*tot;
+  for(let i=0;i<LM.length;i++){ r-=w[i]; if(r<=0 && w[i]>0) return i; }
+  return (not+1)%LM.length;
+}
+function mkAgents(count){
+  AG=[];
+  for(let i=0;i<count;i++){const k=i%LM.length;const a=LM[k];
+    AG.push({x:a.x+(R()-.5)*2, z:a.z+(R()-.5)*2, g:pickGoal(k)});}
+}
+
+const W_GOAL=1.0, W_PATH=1.9, W_RAND=0.12, LOOK=2.2, SPEED=0.15, DEP=0.11, DECAY=0.9990, REACH=1.8;
+const PASS_R=5;
+function step(){
+  for(const a of AG){
+    const goal=LM[a.g]; if(!goal){a.g=pickGoal(-1);continue;}
+    const gdir=Math.atan2(goal.z-a.z, goal.x-a.x);
+    let best=-1e18, bestAng=gdir, anyOpen=false;
+    for(let k=-3;k<=3;k++){
+      const ang=gdir + k*0.38;
+      const wx=a.x+Math.cos(ang)*LOOK, wz=a.z+Math.sin(ang)*LOOK;
+      if(blkAt(wx,wz)) continue;
+      anyOpen=true;
+      const align=Math.cos(k*0.38);
+      const path=trAt(wx,wz)*0.6 + trAt(a.x+Math.cos(ang)*LOOK*1.8, a.z+Math.sin(ang)*LOOK*1.8)*0.4;
+      const sc=W_GOAL*align + W_PATH*path + W_RAND*R();
+      if(sc>best){best=sc; bestAng=ang;}
+    }
+    if(!anyOpen){ for(let k=1;k<=8 && !anyOpen;k++) for(const s of [1,-1]){
+      const ang=gdir+s*k*0.3927, wx=a.x+Math.cos(ang)*LOOK, wz=a.z+Math.sin(ang)*LOOK;
+      if(!blkAt(wx,wz)){bestAng=ang; anyOpen=true; break;} } }
+    a.x=Math.max(-HALF+1,Math.min(HALF-1, a.x+Math.cos(bestAng)*SPEED));
+    a.z=Math.max(-HALF+1,Math.min(HALF-1, a.z+Math.sin(bestAng)*SPEED));
+    const gx=cx(a.x), gy=cx(a.z);
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+      const X=gx+dx, Y=gy+dy; if(X<0||Y<0||X>=N||Y>=N||blocked[Y*N+X]) continue;
+      const w=(dx||dy)?0.5:1; tramp[Y*N+X]=Math.min(1, tramp[Y*N+X]+DEP*w);
+    }
+    for(const lm of LM){ const dd=Math.hypot(lm.x-a.x, lm.z-a.z); if(dd<PASS_R) lm.flow += 0.02*(1-dd/PASS_R); }
+    if(Math.hypot(goal.x-a.x, goal.z-a.z)<REACH){ goal.visits++; a.g=pickGoal(a.g); }
+  }
+  for(let i=0;i<tramp.length;i++) tramp[i]*=DECAY;
+}
+
+const CAP=6;
+function grow(){
+  for(const lm of LM){
+    const feed = lm.flow*0.05 + lm.visits*0.03;
+    const gain = feed*(1-lm.size/CAP);
+    lm.size += gain - 0.05;
+    lm.size = Math.max(0.5, Math.min(CAP, lm.size));
+    lm.flow=0; lm.visits=0;
+  }
+}
+let spawnEnabled=true;
+function trySpawn(){
+  if(!spawnEnabled || LM.length>=14) return;
+  let bx=-1,by=-1,bt=0;
+  for(let gy=4;gy<N-4;gy+=2)for(let gx=4;gx<N-4;gx+=2){
+    const t=tramp[gy*N+gx]; if(t<bt||t<0.9) continue;
+    const wx=(gx+0.5)/N*L-HALF, wz=(gy+0.5)/N*L-HALF;
+    let near=false; for(const lm of LM){ if(Math.hypot(lm.x-wx,lm.z-wz)<11){near=true;break;} }
+    if(near) continue;
+    bt=t; bx=wx; by=wz;
+  }
+  if(bx>-100 && bt>0.9){ addLM(bx,by,0.7); }
+}
+
+// ---------- один ход = порция симуляции, потом мир замирает ----------
+// growTick растёт по substep'ам; рост/рождение — каждые 40, как в №2 (сохраняем настройку).
+let growTick=0;
+function oneSubstep(){ step(); if(++growTick%40===0){ grow(); trySpawn(); } }
+
+// ---------- отрисовка ----------
+function paint(){
+  const d=img.data;
+  for(let i=0;i<N*N;i++){
+    let r,g,b;
+    if(blocked[i]){r=70;g=120;b=175;}
+    else{ const t=tramp[i], gr=grass[i*3], gg=grass[i*3+1], gb=grass[i*3+2];
+      if(t<=0.55){const u=t/0.55; r=gr+(155-gr)*u; g=gg+(125-gg)*u; b=gb+(85-gb)*u;}
+      else{const u=(t-0.55)/0.45; r=155+(110-155)*u; g=125+(88-125)*u; b=85+(58-85)*u;} }
+    d[i*4]=r; d[i*4+1]=g; d[i*4+2]=b; d[i*4+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+  for(const lm of LM){
+    const px=(lm.x+HALF)/L*N, py=(lm.z+HALF)/L*N;
+    const houses=Math.max(1,Math.round(lm.size*1.6));
+    const rad=1.5+lm.size*0.9;
+    for(let h=0;h<houses;h++){
+      const a=h*2.399, rr=(h===0?0:rad*(0.35+0.65*h/houses));
+      const hx=px+Math.cos(a)*rr, hy=py+Math.sin(a)*rr;
+      ctx.fillStyle='#4a2f1a'; ctx.fillRect(hx-1,hy-0.5,2.2,2);
+      ctx.fillStyle='#b5432b'; ctx.fillRect(hx-1.4,hy-1.6,3,1.4);
+    }
+  }
+  if(showWalkers){ctx.fillStyle='#15151c';
+    for(const a of AG){const px=(a.x+HALF)/L*N, py=(a.z+HALF)/L*N; ctx.fillRect(px-0.9,py-0.9,2,2);}}
+  tex.needsUpdate=true;
+}
+function updateBoard(){
+  const sorted=[...LM].map((l,i)=>({l,i})).sort((a,b)=>b.l.size-a.l.size);
+  document.getElementById('list').innerHTML = sorted.map(({l},n)=>
+    `${n+1}. ${stage(l.size)} <span style="opacity:.6">(${l.size.toFixed(1)})</span>`).join('<br>');
+}
+
+// ---------- 3D-сцена ----------
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x8fb0c9);
+scene.fog=new THREE.Fog(0x8fb0c9, 70, 130);
+const camera=new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 500);
+camera.position.set(0,44,40);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+document.body.appendChild(renderer.domElement);
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true; controls.maxPolarAngle=Math.PI/2.1; controls.target.set(0,0,0);
+
+const tex=new THREE.CanvasTexture(cvs);
+tex.colorSpace=THREE.SRGBColorSpace; tex.minFilter=THREE.LinearFilter; tex.magFilter=THREE.LinearFilter; tex.generateMipmaps=false;
+const plane=new THREE.Mesh(new THREE.PlaneGeometry(L,L), new THREE.MeshBasicMaterial({map:tex}));
+plane.rotation.x=-Math.PI/2; scene.add(plane);
+const edge=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(L,L)),
+  new THREE.LineBasicMaterial({color:0x3a5a3a})); edge.rotation.x=-Math.PI/2; edge.position.y=0.02; scene.add(edge);
+
+// ---------- ход: состояние ----------
+let showWalkers=true, animate=true, autoTurns=false;
+let stepsPerTurn=120, turn=0;
+let running=false, remaining=0, perFrame=1;   // 'running' = ход проигрывается
+const $=id=>document.getElementById(id);
+
+function setState(txt){ $('tstate').textContent=txt; $('tn').textContent=turn; }
+
+function newWorld(){
+  const seed=(+$('seed').value)>>>0 || 1;
+  srand(seed);
+  tramp.fill(0); growTick=0; turn=0; running=false;
+  LM.length=0; STARTS.forEach(([x,z])=>addLM(x,z,1.2));
+  mkAgents(+$('count').value);
+  setState('— мир замер, жду «конец хода»');
+}
+
+function endTurn(){
+  if(running) return;
+  if(animate){
+    running=true; remaining=stepsPerTurn;
+    perFrame=Math.max(1, Math.ceil(stepsPerTurn/72));  // ~1.2 с движения при 60 к/с
+    $('end').disabled=true; setState('— идёт ход…');
+  }else{
+    for(let s=0;s<stepsPerTurn;s++) oneSubstep();
+    turn++; setState('— мир замер');
+  }
+}
+
+// ---------- управление ----------
+$('end').onclick=endTurn;
+$('auto').onchange=e=>autoTurns=e.target.checked;
+$('anim').onchange=e=>animate=e.target.checked;
+$('steps').oninput=e=>stepsPerTurn=+e.target.value;
+$('count').oninput=e=>{ mkAgents(+e.target.value); };  // на замершем мире переселит людей
+$('show').onchange=e=>showWalkers=e.target.checked;
+$('spawn').onchange=e=>spawnEnabled=e.target.checked;
+$('reset').onclick=newWorld;
+newWorld();
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);});
+
+let boardTick=0;
+(function loop(){
+  requestAnimationFrame(loop);
+  if(running){
+    const n=Math.min(perFrame, remaining);
+    for(let s=0;s<n;s++) oneSubstep();
+    remaining-=n;
+    if(remaining<=0){ running=false; turn++; $('end').disabled=false; setState('— мир замер'); }
+  } else if(autoTurns){
+    endTurn();   // авто-режим сам жмёт «конец хода», когда мир замер
+  }
+  paint();
+  if(++boardTick%20===0) updateBoard();
+  controls.update();
+  renderer.render(scene,camera);
+})();
+</script>
+</body>
+</html>
