@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>hata — дом от конструктива</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#9db6c4}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three.module.js"}}</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+
+const R = (s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(20260928);
+const rr = (a,b)=>a+(b-a)*R();
+
+// ---------- текстуры ----------
+function cnv(n){const c=document.createElement('canvas');c.width=c.height=n;return c;}
+function tex(c,rep=1){const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;
+  t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(rep,rep);t.anisotropy=4;return t;}
+
+// солома: вертикальные стебли, низ рваный (альфа)
+function strawCanvas(w,h,frayed){
+  const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');
+  g.fillStyle='#b08a3e';g.fillRect(0,0,w,h);
+  const L=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(777+w+h);
+  for(let i=0;i<w*3;i++){const x=L()*w, wd=0.8+L()*1.8, v=L();
+    const hue=34+L()*12, sat=30+L()*22, li=22+v*30;
+    g.strokeStyle=`hsl(${hue} ${sat}% ${li}%)`;g.lineWidth=wd;g.beginPath();
+    const bow=(L()-0.5)*6;g.moveTo(x,-4);g.quadraticCurveTo(x+bow,h*0.5,x+(L()-0.5)*10,h+4);g.stroke();}
+  // тёмные прожилки-тени между пучками
+  for(let i=0;i<w/6;i++){const x=L()*w;g.strokeStyle='rgba(60,40,10,0.35)';g.lineWidth=2+L()*3;
+    g.beginPath();g.moveTo(x,0);g.lineTo(x+(L()-0.5)*14,h);g.stroke();}
+  if(frayed){ // рваный нижний край
+    g.globalCompositeOperation='destination-out';
+    for(let x=0;x<w;x+=2){const d=h*(0.06+0.10*L());g.fillRect(x,h-d,2,d);}
+    // отдельные свисающие стебли ниже общего края оставляем: вернуть часть
+    g.globalCompositeOperation='source-over';
+    for(let i=0;i<w/3;i++){const x=L()*w;g.strokeStyle=`hsl(${40+L()*10} 50% ${30+L()*30}%)`;
+      g.lineWidth=1+L();g.beginPath();g.moveTo(x,h*0.82);g.lineTo(x+(L()-0.5)*8,h*(0.9+L()*0.1));g.stroke();}
+  }
+  return c;
+}
+const strawT   = tex(strawCanvas(512,512,false)); strawT.wrapT=THREE.ClampToEdgeWrapping;
+const strawFrT = (()=>{const t=tex(strawCanvas(512,512,true));t.wrapT=THREE.ClampToEdgeWrapping;return t;})();
+
+// кора бревна
+function barkCanvas(){
+  const c=cnv(512);const g=c.getContext('2d');g.fillStyle='#7d5f3d';g.fillRect(0,0,512,512);
+  const L=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(311);
+  for(let i=0;i<800;i++){const y=L()*512, ln=30+L()*220, x=L()*512;
+    g.strokeStyle=`hsl(${24+L()*12} ${20+L()*20}% ${26+L()*22}%)`;g.lineWidth=1+L()*3;
+    g.beginPath();g.moveTo(x,y);g.lineTo(x+ln,y+(L()-0.5)*10);g.stroke();}
+  for(let i=0;i<26;i++){const x=L()*512,y=L()*512,r=4+L()*9; // сучки
+    g.fillStyle='#3d2a17';g.beginPath();g.ellipse(x,y,r,r*0.7,L(),0,7);g.fill();
+    g.strokeStyle='#20150b';g.lineWidth=2;g.stroke();}
+  return c;
+}
+const barkT = tex(barkCanvas(),1); barkT.rotation=Math.PI/2; barkT.center.set(0.5,0.5);
+
+// торец бревна: годовые кольца
+function ringCanvas(){
+  const c=cnv(256);const g=c.getContext('2d');g.fillStyle='#c9a86f';g.beginPath();g.arc(128,128,127,0,7);g.fill();
+  const L=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(99);
+  for(let r=120;r>4;r-=3+L()*6){g.strokeStyle=`hsl(33 ${30+L()*20}% ${34+L()*22}%)`;
+    g.lineWidth=1.2+L()*1.6;g.beginPath();g.arc(128+(L()-0.5)*8,128+(L()-0.5)*8,r,0,7);g.stroke();}
+  g.strokeStyle='#5e452a';g.lineWidth=5;g.beginPath();g.arc(128,128,124,0,7);g.stroke();
+  return c;
+}
+const ringT = tex(ringCanvas());
+
+// земля двора: вытоптанная грязь к центру, трава к краю
+function yardCanvas(){
+  const c=cnv(1024);const g=c.getContext('2d');
+  const L=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(555);
+  g.fillStyle='#5f6b38';g.fillRect(0,0,1024,1024);
+  for(let i=0;i<9000;i++){const x=L()*1024,y=L()*1024,d=Math.hypot(x-512,y-512)/512;
+    const mud=d<0.55?1:Math.max(0,(0.88-d)/0.33); // 1=грязь в центре
+    if(L()<mud){g.fillStyle=`hsl(${28+L()*10} ${24+L()*16}% ${22+L()*16}%)`;
+      g.beginPath();g.ellipse(x,y,2+L()*7,1+L()*4,L()*3,0,7);g.fill();}
+    else{g.fillStyle=`hsl(${72+L()*30} ${28+L()*22}% ${24+L()*16}%)`;
+      g.fillRect(x,y,1+L()*3,1+L()*3);}}
+  // рваный внешний край вытоптанного круга (чтобы не был «диском»)
+  g.globalCompositeOperation='destination-out';
+  g.beginPath();g.rect(0,0,1024,1024);
+  for(let a2=64;a2>=0;a2--){
+    const ang=a2/64*Math.PI*2;
+    const rad=452+34*Math.sin(ang*5.3)+22*Math.sin(ang*11.7+2);
+    const px=512+Math.cos(ang)*rad, py=512+Math.sin(ang)*rad;
+    if(a2===64)g.moveTo(px,py);else g.lineTo(px,py);}
+  g.closePath();g.fill('evenodd');
+  g.globalCompositeOperation='source-over';
+  // тропинка к двери (вниз по кадру)
+  g.strokeStyle='rgba(96,72,42,0.85)';g.lineWidth=64;g.lineCap='round';
+  g.beginPath();g.moveTo(512,512);g.quadraticCurveTo(540,760,500,1024);g.stroke();
+  for(let i=0;i<1200;i++){const t=L(),x=505+(L()-0.5)*90+30*Math.sin(t*3),y=512+t*512;
+    g.fillStyle=`hsl(${26+L()*10} 22% ${20+L()*14}%)`;g.beginPath();g.ellipse(x,y,2+L()*5,1+L()*3,L()*3,0,7);g.fill();}
+  return c;
+}
+const yardT = tex(yardCanvas());
+
+// плетёнка (дверь, корзины)
+function wattleCanvas(){
+  const c=cnv(256);const g=c.getContext('2d');g.fillStyle='#7a5c36';g.fillRect(0,0,256,256);
+  const L=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(1234);
+  for(let y=0;y<256;y+=14){for(let x=0;x<256;x+=32){
+    g.fillStyle=`hsl(${30+L()*12} ${30+L()*15}% ${26+L()*18}%)`;
+    g.beginPath();g.ellipse(x+16,y+7,17,6,((x/32+y/14)%2)?0.18:-0.18,0,7);g.fill();
+    g.strokeStyle='rgba(40,26,12,0.5)';g.lineWidth=1;g.stroke();}}
+  return c;
+}
+const wattleT = tex(wattleCanvas(),2);
+
+// ---------- сцена ----------
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0xbfd3da);
+scene.fog=new THREE.Fog(0xbfd3da,55,160);
+const camera=new THREE.PerspectiveCamera(42,innerWidth/innerHeight,0.1,300);
+camera.position.set(12.6,7.3,17.6);camera.lookAt(2.0,2.3,0.6);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.22;
+document.body.appendChild(renderer.domElement);
+
+const sun=new THREE.DirectionalLight(0xfff2da,2.15);
+sun.position.set(20,32,25);sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);sun.shadow.radius=5;
+Object.assign(sun.shadow.camera,{left:-24,right:24,top:24,bottom:-24,near:4,far:90});
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xcfe0ec,0x6a5b3a,0.62));
+
+// ---------- земля ----------
+const ground=new THREE.Mesh(new THREE.CircleGeometry(80,64),
+  new THREE.MeshStandardMaterial({color:0x77804a,roughness:1}));
+ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+const yard=new THREE.Mesh(new THREE.CircleGeometry(11,48),
+  new THREE.MeshStandardMaterial({map:yardT,roughness:1,transparent:true}));
+yard.rotation.x=-Math.PI/2;yard.position.y=0.02;yard.receiveShadow=true;scene.add(yard);
+
+// ---------- материалы ----------
+const logM  = new THREE.MeshStandardMaterial({map:barkT,roughness:0.95});
+const ringM = new THREE.MeshStandardMaterial({map:ringT,roughness:0.9});
+const strawM= new THREE.MeshStandardMaterial({map:strawT,roughness:1,side:THREE.DoubleSide});
+const strawFrM=new THREE.MeshStandardMaterial({map:strawFrT,roughness:1,side:THREE.DoubleSide,
+  transparent:true,alphaTest:0.45});
+
+// бревно: цилиндр + два торца с кольцами, лёгкая кривизна через наклон
+function log(len,r0,r1){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(r1,r0,len,9,1),logM);
+  body.castShadow=body.receiveShadow=true;g.add(body);
+  for(const e of[-1,1]){const cap=new THREE.Mesh(new THREE.CircleGeometry(e<0?r0:r1,9),ringM);
+    cap.position.y=e*len/2;cap.rotation.x=e<0?Math.PI/2:-Math.PI/2;cap.castShadow=true;g.add(cap);}
+  return g;
+}
+
+// ---------- ДОМ: конструкция ----------
+const house=new THREE.Group();scene.add(house);
+const RAD=4.0;          // радиус стен
+const WALL_H=2.9;       // высота стены
+const APEX=6.4;         // высота конька
+const POSTS=12;         // стоек по кругу
+const DOOR_I=3;         // сегмент двери (смотрит на камеру/тропу)
+
+// фундамент: валуны под стеной
+const stoneM=new THREE.MeshStandardMaterial({color:0x8d8778,roughness:1});
+for(let i=0;i<34;i++){const a=i/34*Math.PI*2+rr(-0.05,0.05);
+  const s=new THREE.Mesh(new THREE.DodecahedronGeometry(rr(0.16,0.3),0),stoneM);
+  s.position.set(Math.cos(a)*RAD,rr(0.02,0.1),Math.sin(a)*RAD);
+  s.scale.y=rr(0.5,0.75);s.rotation.set(R()*3,R()*3,R()*3);s.castShadow=true;house.add(s);}
+
+// стойки (вертикальные брёвна), чуть выше стены, каждая со своим наклоном
+const postPos=[];
+for(let i=0;i<POSTS;i++){const a=i/POSTS*Math.PI*2;
+  const x=Math.cos(a)*RAD, z=Math.sin(a)*RAD; postPos.push([x,z,a]);
+  const h=WALL_H+rr(0.15,0.45);
+  const p=log(h,rr(0.13,0.16),rr(0.10,0.13));
+  p.position.set(Math.cos(a)*(RAD+0.12),h/2,Math.sin(a)*(RAD+0.12));
+  p.rotation.set(rr(-0.02,0.02),0,rr(-0.02,0.02));house.add(p);}
+
+// стена: сплошной цилиндр с запечёнными венцами (проём двери вырезан углом)
+function logWallCanvas(){
+  const c=cnv(1024);const g=c.getContext('2d');
+  const L=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(2024);
+  const COURSES=7, ch=1024/COURSES;
+  for(let k=0;k<COURSES;k++){
+    const y0=k*ch;
+    // тело бревна: продольный градиент (свет сверху, тень снизу)
+    const gr=g.createLinearGradient(0,y0,0,y0+ch);
+    gr.addColorStop(0,'#5c452a');gr.addColorStop(0.28,`hsl(${27+L()*8} 30% ${41+L()*7}%)`);
+    gr.addColorStop(0.75,`hsl(${25+L()*8} 28% ${31+L()*6}%)`);gr.addColorStop(1,'#33230f');
+    g.fillStyle=gr;g.fillRect(0,y0,1024,ch);
+    // волокна коры
+    for(let i=0;i<260;i++){const x=L()*1024,y=y0+ch*0.12+L()*ch*0.76,ln=40+L()*200;
+      g.strokeStyle=`hsla(${24+L()*14},22%,${24+L()*24}%,0.4)`;g.lineWidth=1+L()*2;
+      g.beginPath();g.moveTo(x,y);g.lineTo(x+ln,y+(L()-0.5)*5);g.stroke();}
+    // сучки
+    for(let i=0;i<7;i++){const x=L()*1024,y=y0+ch*(0.3+L()*0.4),r=4+L()*8;
+      g.fillStyle='#33220f';g.beginPath();g.ellipse(x,y,r,r*0.7,L(),0,7);g.fill();}
+    // пакля-глина в пазу
+    g.fillStyle='rgba(160,138,96,0.75)';
+    for(let x=0;x<1024;x+=8+L()*30)g.fillRect(x,y0+ch-5,6+L()*22,4);
+  }
+  // износ: потёки, грязные пятна, мох у земли
+  for(let i=0;i<40;i++){const x=L()*1024,y=L()*1024;
+    g.fillStyle=`rgba(30,20,8,${0.05+L()*0.12})`;
+    g.beginPath();g.ellipse(x,y,8+L()*34,20+L()*60,0,0,7);g.fill();}
+  for(let i=0;i<70;i++){const x=L()*1024,y=880+L()*140;
+    g.fillStyle=`rgba(${60+L()*40|0},${90+L()*40|0},30,${0.10+L()*0.20})`;
+    g.beginPath();g.ellipse(x,y,6+L()*22,4+L()*12,0,0,7);g.fill();}
+  return c;
+}
+{
+  const wallT=tex(logWallCanvas());wallT.repeat.set(3,1);
+  const wallM=new THREE.MeshStandardMaterial({map:wallT,roughness:1,
+    bumpMap:wallT,bumpScale:3.5});
+  // дверной сегмент i=3: a∈[90°,120°] → theta=π/2−a → проём [11π/6, 2π]
+  const wall=new THREE.Mesh(
+    new THREE.CylinderGeometry(RAD-0.02,RAD+0.04,WALL_H,64,1,true,0,Math.PI*11/6),wallM);
+  wall.position.y=WALL_H/2;wall.castShadow=wall.receiveShadow=true;house.add(wall);
+  // перемычка над дверью
+  const over=new THREE.Mesh(
+    new THREE.CylinderGeometry(RAD-0.02,RAD-0.02,WALL_H-2.15,12,1,true,Math.PI*11/6,Math.PI/6),wallM);
+  over.position.y=(2.15+WALL_H)/2;over.castShadow=true;house.add(over);
+  // сегмент с глиняной обмазкой по плетню (разнообразие материала)
+  const cc=cnv(512);const cg=cc.getContext('2d');
+  const LC=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(4321);
+  cg.fillStyle='#ac9066';cg.fillRect(0,0,512,512);
+  for(let i=0;i<900;i++){cg.fillStyle=`hsla(${34+LC()*10},${22+LC()*12}%,${54+LC()*10}%,0.28)`;
+    cg.beginPath();cg.ellipse(LC()*512,LC()*512,3+LC()*14,2+LC()*8,LC()*3,0,7);cg.fill();}
+  for(let i=0;i<22;i++){ // трещины
+    let x=LC()*512,y=LC()*512;cg.strokeStyle='rgba(70,50,25,0.55)';cg.lineWidth=1+LC();
+    cg.beginPath();cg.moveTo(x,y);
+    for(let s2=0;s2<5;s2++){x+=(LC()-0.5)*46;y+=18+LC()*26;cg.lineTo(x,y);}cg.stroke();}
+  // отвалившийся кусок: проступает плетень (немного, у низа)
+  for(let i=0;i<2;i++){const x=LC()*400+60,y=390+LC()*80,w2=26+LC()*26,h2=18+LC()*20;
+    cg.save();cg.beginPath();cg.ellipse(x,y,w2,h2,LC(),0,7);cg.clip();
+    cg.fillStyle='#6d5231';cg.fillRect(x-w2,y-h2,w2*2,h2*2);
+    for(let yy=-h2;yy<h2;yy+=9){cg.strokeStyle=`hsla(${30+LC()*10},30%,${30+LC()*16}%,0.9)`;
+      cg.lineWidth=4;cg.beginPath();cg.moveTo(x-w2,y+yy);
+      cg.quadraticCurveTo(x,y+yy+(LC()-0.5)*8,x+w2,y+yy);cg.stroke();}
+    cg.restore();}
+  const clayT=tex(cc);
+  const clay=new THREE.Mesh(
+    new THREE.CylinderGeometry(RAD+0.05,RAD+0.08,WALL_H-0.25,24,1,true,Math.PI/5,Math.PI/4.4),
+    new THREE.MeshStandardMaterial({map:clayT,roughness:1,bumpMap:clayT,bumpScale:2.5}));
+  clay.position.y=(WALL_H-0.25)/2;clay.castShadow=clay.receiveShadow=true;house.add(clay);
+}
+
+// дверной проём: косяки, притолока, порог, плетёная дверь приоткрыта
+{
+  const [x1,z1]=postPos[DOOR_I],[x2,z2]=postPos[(DOOR_I+1)%POSTS];
+  const dirx=(x2-x1),dirz=(z2-z1),L0=Math.hypot(dirx,dirz);
+  const ux=dirx/L0,uz=dirz/L0;
+  let cx=(x1+x2)/2,cz=(z1+z2)/2;
+  const fR=(RAD+0.06)/Math.hypot(cx,cz);cx*=fR;cz*=fR;  // на дугу стены, не на хорду
+  const W=1.0;
+  for(const s of[-1,1]){const j=log(2.05,0.11,0.1);
+    j.position.set(cx+ux*s*W/2,1.0,cz+uz*s*W/2);house.add(j);}
+  const lintel=log(W+0.7,0.12,0.11);lintel.rotation.z=Math.PI/2;
+  const lh=new THREE.Group();lh.add(lintel);lh.rotation.y=Math.atan2(ux,uz);
+  lh.position.set(cx,2.02,cz);house.add(lh);
+  const sill=new THREE.Mesh(new THREE.BoxGeometry(W+0.5,0.14,0.5),stoneM);
+  sill.rotation.y=Math.atan2(ux,uz);sill.position.set(cx,0.07,cz);sill.castShadow=true;house.add(sill);
+  // дверь-плетёнка, приоткрыта
+  const door=new THREE.Mesh(new THREE.BoxGeometry(0.92,1.75,0.07),
+    new THREE.MeshStandardMaterial({map:wattleT,roughness:1}));
+  door.castShadow=true;
+  const dg=new THREE.Group();dg.position.set(cx+ux*W/2,0.95,cz+uz*W/2);
+  dg.rotation.y=Math.atan2(ux,uz)+0.7;door.position.x=-0.46;dg.add(door);house.add(dg);
+  // тёмная внутренность дома (видна сквозь проём)
+  const inner=new THREE.Mesh(new THREE.CylinderGeometry(RAD-0.18,RAD-0.18,WALL_H-0.1,24,1,false),
+    new THREE.MeshBasicMaterial({color:0x0f0a05,side:THREE.BackSide}));
+  inner.position.y=(WALL_H-0.1)/2;house.add(inner);
+  // над дверью венцы короткие не кладём — фронтончик из жердей
+  for(let k=0;k<2;k++){const l=log(W+0.6,0.09,0.08);l.rotation.z=Math.PI/2;
+    const h2=new THREE.Group();h2.add(l);h2.rotation.y=Math.atan2(ux,uz);
+    h2.position.set(cx*0.997,2.02+0.22+k*0.2,cz*0.997);house.add(h2);}
+}
+
+// обвязка поверху стены (кольцо из брёвен по хордам)
+for(let i=0;i<POSTS;i++){
+  const [x1,z1]=postPos[i],[x2,z2]=postPos[(i+1)%POSTS];
+  const mx=(x1+x2)/2,mz=(z1+z2)/2,len=Math.hypot(x2-x1,z2-z1)*1.12;
+  const l=log(len,0.12,0.11);l.rotation.z=Math.PI/2;
+  const h=new THREE.Group();h.add(l);h.rotation.y=Math.atan2(x2-x1,z2-z1);
+  h.position.set(mx,WALL_H+0.34,mz);house.add(h);}
+
+// верхнее (компрессионное) кольцо
+{
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(0.55,0.09,7,18),logM);
+  ring.rotation.x=Math.PI/2;ring.position.y=APEX-0.35;ring.castShadow=true;house.add(ring);
+}
+
+// стропила: жерди от обвязки к верхнему кольцу, концы ТОРЧАТ выше, перекрещиваясь
+const RAFTERS=22;
+const eave=1.05;               // вынос свеса за стену, м
+for(let i=0;i<RAFTERS;i++){
+  const a=i/RAFTERS*Math.PI*2+rr(-0.02,0.02);
+  const x0=Math.cos(a)*(RAD+eave+0.55), z0=Math.sin(a)*(RAD+eave+0.55), y0=WALL_H-0.18; // конец торчит из-под свеса
+  const x1=Math.cos(a)*0.6, z1=Math.sin(a)*0.6, y1=APEX-0.35;                // верх спрятан под соломой
+  const len=Math.hypot(x1-x0,y1-y0,Math.hypot(z1-z0));
+  const r=rr(0.05,0.075);
+  const raft=new THREE.Mesh(new THREE.CylinderGeometry(r*0.7,r,len,7),logM);
+  raft.castShadow=true;
+  raft.position.set((x0+x1)/2,(y0+y1)/2,(z0+z1)/2);
+  raft.lookAt(x1,y1,z1);raft.rotateX(Math.PI/2);
+  house.add(raft);}
+
+// сноп торчащих концов жердей на макушке (перекрестье, как у настоящего чума)
+for(let i=0;i<9;i++){
+  const a=i/9*Math.PI*2+rr(-0.2,0.2);
+  const p=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.05,rr(1.4,2.0),6),logM);
+  p.position.set(Math.cos(a)*0.28,APEX+rr(0.25,0.55),Math.sin(a)*0.28);
+  p.rotation.set(Math.cos(a)*rr(0.22,0.38),0,-Math.sin(a)*rr(0.22,0.38));
+  p.castShadow=true;house.add(p);}
+
+// ---------- солома: сплошной ступенчатый конус ярусами ----------
+const tmpM=new THREE.Matrix4(),tmpQ=new THREE.Quaternion(),tmpE=new THREE.Euler();
+const cTint=new THREE.Color();
+const ROWS=7;
+const RB=RAD+eave+0.18, YB=WALL_H+0.05;      // низ ската (за стеной)
+const RT=0.5,             YT=APEX;           // верх
+const rAt=t=>RB*(1-t)+RT*t, yAt=t=>YB*(1-t)+YT*t;
+{
+  // текстура яруса: солома + тень нахлёста сверху, светлый срез снизу
+  const rc=strawCanvas(512,512,false);const rg=rc.getContext('2d');
+  const gr=rg.createLinearGradient(0,0,0,512);
+  gr.addColorStop(0,'rgba(30,18,6,0.55)');gr.addColorStop(0.3,'rgba(30,18,6,0.12)');
+  gr.addColorStop(0.9,'rgba(255,230,160,0.05)');gr.addColorStop(1,'rgba(255,235,170,0.22)');
+  rg.fillStyle=gr;rg.fillRect(0,0,512,512);
+  // износ: выцветшие и подгнившие пятна соломы
+  const LL=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(9090);
+  for(let i=0;i<26;i++){const x=LL()*512,y=LL()*512;
+    rg.fillStyle=LL()<0.5?`rgba(70,50,20,${0.10+LL()*0.16})`:`rgba(215,200,150,${0.08+LL()*0.12})`;
+    rg.beginPath();rg.ellipse(x,y,10+LL()*40,25+LL()*70,0,0,7);rg.fill();}
+  const strawRoofT=tex(rc);strawRoofT.repeat.set(26,4);
+  const roofM=new THREE.MeshStandardMaterial({map:strawRoofT,roughness:1,
+    bumpMap:strawRoofT,bumpScale:3.2});
+  // сплошная толща соломы: завёрнутый толстый край + плавный конус с лёгкой волной
+  const pts=[];
+  pts.push(new THREE.Vector2(RB-0.22, YB-0.30));   // внутренняя кромка среза
+  pts.push(new THREE.Vector2(RB+0.10, YB-0.26));   // низ толстого края
+  pts.push(new THREE.Vector2(RB+0.24, YB-0.06));   // наружная щека края
+  pts.push(new THREE.Vector2(RB+0.17, YB+0.16));   // заворот вверх
+  for(let k=1;k<=ROWS;k++){
+    const t=k/ROWS;
+    pts.push(new THREE.Vector2(rAt(t)+0.06+0.045*Math.sin(k*2.1), yAt(t)));
+  }
+  const roofGeo=new THREE.LatheGeometry(pts,72);
+  // помять идеальные кольца: радиальный+вертикальный шум по углу и высоте
+  const P=roofGeo.attributes.position;
+  for(let i=0;i<P.count;i++){
+    const x=P.getX(i),y=P.getY(i),z=P.getZ(i),r0=Math.hypot(x,z);
+    if(r0<0.05)continue;
+    const a=Math.atan2(z,x);
+    const n=Math.sin(a*6+y*2.2)*0.45+Math.sin(a*13+1.7+y)*0.33+Math.sin(a*27+y*7)*0.22
+           +Math.sin(a*41+y*13)*0.12;
+    const k=1+n*0.085;
+    P.setX(i,x*k);P.setZ(i,z*k);P.setY(i,y+n*0.11);
+  }
+  roofGeo.computeVertexNormals();
+  const roof=new THREE.Mesh(roofGeo,roofM);
+  roof.castShadow=roof.receiveShadow=true;house.add(roof);
+}
+// рваная юбка по нижнему краю ската (свисает ниже свеса)
+{
+  const count=54;
+  const pl=new THREE.PlaneGeometry(0.5,0.5);
+  pl.translate(0,-0.24,0);
+  pl.rotateX(-0.62);                       // висит почти вниз, чуть от стены
+  const im=new THREE.InstancedMesh(pl,strawFrM,count);
+  im.castShadow=true;
+  for(let i=0;i<count;i++){
+    const a=(i+rr(-0.3,0.3))/count*Math.PI*2;
+    const rj=RB+0.10;
+    tmpE.set(0,-a+Math.PI/2,rr(-0.07,0.07));tmpQ.setFromEuler(tmpE);
+    tmpM.compose(new THREE.Vector3(Math.cos(a)*rj,YB+rr(-0.02,0.05),Math.sin(a)*rj),
+      tmpQ,new THREE.Vector3(rr(0.8,1.3),rr(0.8,1.3),1));
+    im.setMatrixAt(i,tmpM);
+    cTint.setHSL(0.105+rr(-0.012,0.012),rr(0.42,0.56),rr(0.52,0.66));im.setColorAt(i,cTint);}
+  house.add(im);
+}
+// колпак-сноп на макушке
+{
+  const cap=new THREE.Mesh(new THREE.ConeGeometry(0.75,1.1,10,1,true),strawM);
+  cap.position.y=APEX+0.32;cap.castShadow=true;house.add(cap);
+  const tie=new THREE.Mesh(new THREE.TorusGeometry(0.42,0.045,6,14),
+    new THREE.MeshStandardMaterial({color:0x6d5327,roughness:1}));
+  tie.rotation.x=Math.PI/2;tie.position.y=APEX+0.55;house.add(tie);
+}
+
+// ---------- навес у входа (в локальных координатах: +x = наружу от двери) ----------
+{
+  const aDoor=(105)*Math.PI/180;
+  const g=new THREE.Group();g.rotation.y=-aDoor;scene.add(g);
+  // стойки с наклоном
+  const posts2=[[RAD+1.95,-1.2,1.95],[RAD+1.9,1.15,2.05]];
+  for(const [px,pz,h] of posts2){
+    const st=log(h,0.075,0.06);st.position.set(px,h/2,pz);
+    st.rotation.z=rr(-0.05,0.05);st.rotation.x=rr(-0.05,0.05);g.add(st);}
+  // прогоны от стены к стойкам
+  for(const [px,pz,h] of posts2){
+    const x0=RAD-0.15,y0=2.55;
+    const len=Math.hypot(px-x0,h-y0)+0.55;
+    const beam=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.06,len,7),logM);
+    beam.position.set((x0+px)/2+0.1,(y0+h)/2,pz*0.94);
+    beam.rotation.z=Math.PI/2-Math.atan2(h-y0,px-x0);
+    beam.castShadow=true;g.add(beam);}
+  // поперечины
+  for(const [bx,by] of [[RAD+0.55,2.42],[RAD+1.75,2.02]]){
+    const bar=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.04,2.75,6),logM);
+    bar.rotation.x=Math.PI/2;bar.position.set(bx,by,0);bar.castShadow=true;g.add(bar);}
+  // скат соломы
+  const shedGeo=new THREE.PlaneGeometry(2.6,2.85);
+  shedGeo.rotateX(-Math.PI/2);          // горизонтально, лицом вверх
+  shedGeo.rotateZ(-0.24);               // наклон наружу-вниз
+  const shed=new THREE.Mesh(shedGeo,new THREE.MeshStandardMaterial({map:strawT,roughness:1,side:THREE.DoubleSide}));
+  shed.position.set(RAD+0.72,2.34,0);shed.castShadow=true;g.add(shed);
+  // рваный край свисает с внешней кромки ската
+  const frG=new THREE.PlaneGeometry(0.42,0.5);frG.translate(0,-0.22,0);
+  for(let i=0;i<7;i++){
+    const fr=new THREE.Mesh(frG,strawFrM);
+    fr.position.set(RAD+2.0,2.06,-1.25+i*0.42+rr(-0.05,0.05));
+    fr.rotation.set(rr(-0.15,0.05),Math.PI/2,rr(-0.3,-0.15));fr.castShadow=true;g.add(fr);}
+  // помост из плах (вдоль выхода)
+  const plankM=new THREE.MeshStandardMaterial({map:barkT,roughness:1});
+  for(let i=0;i<4;i++){
+    const pl2=new THREE.Mesh(new THREE.BoxGeometry(2.0,0.09,0.4),plankM);
+    pl2.position.set(RAD+1.0,0.1+rr(0,0.03),(i-1.5)*0.44);
+    pl2.rotation.y=rr(-0.04,0.04);pl2.castShadow=pl2.receiveShadow=true;g.add(pl2);}
+  // чурбаки под помостом
+  for(const zz of [-0.7,0.7]){const ch2=log(0.5,0.11,0.11);ch2.position.set(RAD+1.0,0.06,zz);
+    ch2.rotation.x=Math.PI/2;g.add(ch2);}
+}
+
+// ---------- двор ----------
+// контактная тень под домом
+{
+  const sc=cnv(256);const sg=sc.getContext('2d');
+  const rad=sg.createRadialGradient(128,128,60,128,128,128);
+  rad.addColorStop(0,'rgba(0,0,0,0.34)');rad.addColorStop(0.72,'rgba(0,0,0,0.22)');
+  rad.addColorStop(1,'rgba(0,0,0,0)');
+  sg.fillStyle=rad;sg.fillRect(0,0,256,256);
+  const st=new THREE.CanvasTexture(sc);
+  const sh=new THREE.Mesh(new THREE.CircleGeometry(RAD+1.7,40),
+    new THREE.MeshBasicMaterial({map:st,transparent:true,depthWrite:false}));
+  sh.rotation.x=-Math.PI/2;sh.position.y=0.028;scene.add(sh);
+}
+// частокол-огородка за домом (ломает силуэт)
+{
+  const g=new THREE.Group();
+  for(let i=0;i<10;i++){
+    const a=(-62+i*5.4)*Math.PI/180;
+    const h=rr(1.15,1.75);
+    const k=new THREE.Mesh(new THREE.CylinderGeometry(rr(0.05,0.07),rr(0.07,0.095),h,7),logM);
+    k.position.set(Math.cos(a)*6.6+rr(-0.08,0.08),h/2,Math.sin(a)*6.6+rr(-0.08,0.08));
+    k.rotation.set(rr(-0.07,0.07),0,rr(-0.07,0.07));k.castShadow=true;g.add(k);
+    // заострённая макушка
+    const tip=new THREE.Mesh(new THREE.ConeGeometry(0.055,0.16,7),ringM);
+    tip.position.set(k.position.x,h+0.06,k.position.z);tip.rotation.copy(k.rotation);g.add(tip);}
+  // связующая жердь
+  for(let s=0;s<1;s++){
+    const a0=(-52)*Math.PI/180;
+    const bar=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,4.4,6),logM);
+    bar.rotation.z=Math.PI/2;bar.rotation.y=-a0-Math.PI/2+Math.PI/2;
+    bar.rotation.set(0,-(a0+19*Math.PI/180)+Math.PI/2,Math.PI/2);
+    bar.position.set(Math.cos(a0+19*Math.PI/180)*6.6,rr(0.85,1.0),Math.sin(a0+19*Math.PI/180)*6.6);
+    g.add(bar);}
+  scene.add(g);
+}
+// стожок сена
+{
+  const hayGeo=new THREE.ConeGeometry(1.05,1.9,14,4);
+  const HP=hayGeo.attributes.position;
+  for(let i=0;i<HP.count;i++){const x=HP.getX(i),y=HP.getY(i),z=HP.getZ(i);
+    const a=Math.atan2(z,x),n=Math.sin(a*5+y*3)*0.5+Math.sin(a*11)*0.5;
+    const k=1+n*0.07;HP.setX(i,x*k);HP.setZ(i,z*k);}
+  hayGeo.computeVertexNormals();
+  const hay=new THREE.Mesh(hayGeo,new THREE.MeshStandardMaterial({map:strawT,roughness:1}));
+  hay.scale.setScalar(0.72);hay.position.set(9.0,0.67,-3.6);hay.castShadow=true;scene.add(hay);
+  const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.05,2.0,6),logM);
+  pole.position.set(9.0,1.15,-3.6);scene.add(pole);
+}
+// растяжка со шкурой
+{
+  const g=new THREE.Group();
+  for(const dx of[-0.9,0.9]){const p=log(1.75,0.05,0.045);p.position.set(dx,0.85,0);
+    p.rotation.z=dx>0?-0.1:0.1;g.add(p);}
+  const bar=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,1.9,6),logM);
+  bar.rotation.z=Math.PI/2;bar.position.y=1.52;g.add(bar);
+  // шкура: пятнистый неровный лоскут
+  const hc=cnv(128);const hg=hc.getContext('2d');
+  hg.fillStyle='#96754c';hg.beginPath();
+  hg.moveTo(20,8);hg.quadraticCurveTo(64,0,108,10);hg.quadraticCurveTo(126,60,104,112);
+  hg.quadraticCurveTo(64,127,26,110);hg.quadraticCurveTo(2,58,20,8);hg.fill();
+  const LH=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(77);
+  for(let i=0;i<26;i++){hg.fillStyle=`rgba(90,60,30,${0.15+LH()*0.3})`;
+    hg.beginPath();hg.ellipse(20+LH()*88,15+LH()*95,4+LH()*12,3+LH()*9,LH()*3,0,7);hg.fill();}
+  const ht=new THREE.CanvasTexture(hc);ht.colorSpace=THREE.SRGBColorSpace;
+  const hide=new THREE.Mesh(new THREE.PlaneGeometry(1.45,1.5),
+    new THREE.MeshStandardMaterial({map:ht,transparent:true,alphaTest:0.5,side:THREE.DoubleSide,roughness:1}));
+  hide.position.y=0.8;g.add(hide);
+  g.position.set(-1.6,0,8.2);g.rotation.y=0.35;scene.add(g);
+}
+// поленница (в кадре, слева перед домом)
+{
+  const g=new THREE.Group();
+  for(let ry=0;ry<4;ry++)for(let i=0;i<7-ry;i++){
+    const l=log(rr(1.0,1.25),0.085,0.08);l.rotation.z=Math.PI/2;
+    const h=new THREE.Group();h.add(l);
+    h.position.set(-0.0+(i-(6-ry)/2)*0.19+rr(-0.01,0.01),0.09+ry*0.155,rr(-0.02,0.02));
+    g.add(h);}
+  g.position.set(-3.6,0,4.1);g.rotation.y=2.15;scene.add(g);
+}
+// костровище
+{
+  const g=new THREE.Group();
+  for(let i=0;i<9;i++){const a=i/9*Math.PI*2;
+    const s=new THREE.Mesh(new THREE.DodecahedronGeometry(rr(0.13,0.2),0),stoneM);
+    s.position.set(Math.cos(a)*0.6,0.08,Math.sin(a)*0.6);s.rotation.set(R()*3,R()*3,R()*3);
+    s.castShadow=true;g.add(s);}
+  const ash=new THREE.Mesh(new THREE.CircleGeometry(0.5,16),
+    new THREE.MeshStandardMaterial({color:0x2e2a26,roughness:1}));
+  ash.rotation.x=-Math.PI/2;ash.position.y=0.03;g.add(ash);
+  for(let i=0;i<3;i++){const l=log(rr(0.7,0.9),0.05,0.04);l.rotation.z=Math.PI/2;
+    const h=new THREE.Group();h.add(l);h.rotation.y=R()*3;h.position.set(rr(-0.1,0.1),0.07,rr(-0.1,0.1));
+    h.rotation.x=rr(0.04,0.12);g.add(h);}
+  g.position.set(3.4,0,4.6);scene.add(g);
+}
+// корзины
+const basketM=new THREE.MeshStandardMaterial({map:wattleT,roughness:1,side:THREE.DoubleSide});
+for(const [bx,bz,bs] of [[0.6,5.1,1],[4.35,1.7,0.75]]){
+  const pts=[];for(let i=0;i<=7;i++)pts.push(new THREE.Vector2(0.17+0.2*Math.sin(i/7*1.5),i/7*0.42));
+  const b=new THREE.Mesh(new THREE.LatheGeometry(pts,12),basketM);
+  b.scale.setScalar(bs);b.position.set(bx,0,bz);b.castShadow=true;scene.add(b);}
+
+// ---------- трава вокруг (вне двора) ----------
+{
+  const bladeC=document.createElement('canvas');bladeC.width=64;bladeC.height=64;
+  const g=bladeC.getContext('2d');
+  const L=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(42);
+  for(let i=0;i<11;i++){const x=10+L()*44;g.strokeStyle=`hsl(${74+L()*26} ${30+L()*22}% ${28+L()*18}%)`;
+    g.lineWidth=1+L()*1.6;g.beginPath();g.moveTo(x,64);
+    g.quadraticCurveTo(x+(L()-0.5)*14,30,x+(L()-0.5)*24,4+L()*14);g.stroke();}
+  const bt=new THREE.CanvasTexture(bladeC);bt.colorSpace=THREE.SRGBColorSpace;
+  const bm=new THREE.MeshStandardMaterial({map:bt,transparent:true,alphaTest:0.3,
+    side:THREE.DoubleSide,roughness:1});
+  const bg=new THREE.PlaneGeometry(0.5,0.42);bg.translate(0,0.2,0);
+  const N=10500;const im=new THREE.InstancedMesh(bg,bm,N);
+  for(let i=0;i<N;i++){
+    let d;
+    const rl=R();
+    if(rl<0.12) d=8.4+R()*2.2;                 // редкие пучки по краю двора
+    else if(rl<0.72) d=10.6+Math.pow(R(),0.8)*9;  // плотное кольцо за двором
+    else d=19.5+Math.pow(R(),0.9)*18;             // дальше реже
+    const a=R()*Math.PI*2;
+    const x=Math.cos(a)*d,z=Math.sin(a)*d;
+    const s=d<10.6?rr(0.4,0.7):rr(0.65,1.25);
+    tmpE.set(0,R()*Math.PI,0);tmpQ.setFromEuler(tmpE);
+    tmpM.compose(new THREE.Vector3(x,0,z),tmpQ,new THREE.Vector3(s,s*rr(0.85,1.3),1));
+    im.setMatrixAt(i,tmpM);
+    cTint.setHSL(0.20+rr(-0.03,0.03),rr(0.32,0.5),rr(0.34,0.52));im.setColorAt(i,cTint);}
+  scene.add(im);
+}
+// ---------- СРУБ от конструктива ----------
+{
+  const g=new THREE.Group();
+  const LX=5.0, LZ=3.8;          // размеры по осям
+  const VN=6;                    // венцов до фронтона
+  const vd=0.36;                 // шаг венца
+  // венцы: брёвна вдоль стен, торцы выступают перерубами на углах
+  for(let k=0;k<VN;k++){
+    const y=0.22+k*vd;
+    const rB=()=>rr(0.145,0.175);
+    // пара вдоль X (стены z=±LZ/2) — чётные ряды длиннее (перерубы наружу)
+    for(const sz of[-1,1]){
+      const l=log(LX+ (k%2?0.55:0.05), rB(), rB());
+      l.rotation.z=Math.PI/2;
+      const h=new THREE.Group();h.add(l);
+      h.rotation.y=0;h.position.set(0,y+(k%2?0:0.0),sz*LZ/2);
+      h.rotation.x=rr(-0.01,0.01);g.add(h);}
+    // пара вдоль Z (стены x=±LX/2) — нечётные ряды длиннее, приподняты на полбревна
+    for(const sx of[-1,1]){
+      const l=log(LZ+ (k%2?0.05:0.55), rB(), rB());
+      l.rotation.z=Math.PI/2;
+      const h=new THREE.Group();h.add(l);
+      h.rotation.y=Math.PI/2;h.position.set(sx*LX/2,y+vd/2,0);
+      h.rotation.z=rr(-0.01,0.01);g.add(h);}
+  }
+  const wallTop=0.22+VN*vd;
+  // фронтоны-самцы: укорачивающиеся брёвна до конька (по стенам x=±LX/2)
+  const GH=1.5;                  // высота фронтона
+  const GN=4;
+  for(let k=0;k<GN;k++){
+    const t=(k+1)/(GN+1);
+    const len=LZ*(1-t*0.92);
+    const y=wallTop+ (k+0.5)*(GH/GN)*0.82;
+    for(const sx of[-1,1]){
+      const l=log(len,0.14,0.13);l.rotation.z=Math.PI/2;
+      const h=new THREE.Group();h.add(l);h.rotation.y=Math.PI/2;
+      h.position.set(sx*LX/2,y,0);g.add(h);}
+  }
+  const ridgeY=wallTop+GH;
+  // конёк-бревно
+  {const l=log(LX+0.9,0.13,0.12);l.rotation.z=Math.PI/2;
+   const h=new THREE.Group();h.add(l);h.position.set(0,ridgeY,0);g.add(h);}
+  // скаты: мятые плоскости с соломой + рваная юбка по низу
+  const roofT2=tex(strawCanvas(512,512,false));roofT2.repeat.set(5,2);
+  const SL=Math.hypot(LZ/2+0.65,GH+0.15);
+  for(const sz of[-1,1]){
+    const geo=new THREE.PlaneGeometry(LX+1.1,SL,10,5);
+    const PP=geo.attributes.position;
+    for(let i=0;i<PP.count;i++){const x=PP.getX(i),y2=PP.getY(i);
+      PP.setZ(i,(Math.sin(x*2.7)*0.5+Math.sin(x*6.1+y2*3)*0.3+Math.sin(y2*5+x*11)*0.2)*0.09);}
+    geo.computeVertexNormals();
+    const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({map:roofT2,roughness:1,
+      bumpMap:roofT2,bumpScale:3,side:THREE.DoubleSide}));
+    const ang=Math.atan2(GH+0.15,LZ/2+0.65);
+    m.rotation.set(sz>0? -(Math.PI/2-ang) : (Math.PI/2-ang) ,0,0);
+    m.position.set(0,(wallTop+ridgeY)/2+0.10,sz*(LZ/4+0.18));
+    m.castShadow=m.receiveShadow=true;g.add(m);
+    // толстый валик по нижней кромке ската (толща соломы)
+    const roll=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.15,LX+1.05,10),
+      new THREE.MeshStandardMaterial({map:roofT2,roughness:1}));
+    roll.rotation.z=Math.PI/2;roll.position.set(0,wallTop+0.05,sz*(LZ/2+0.58));
+    roll.castShadow=true;g.add(roll);
+    // редкие свисающие пряди из-под валика
+    for(let i=0;i<5;i++){
+      const fr=new THREE.Mesh(new THREE.PlaneGeometry(0.44,0.4),strawFrM);
+      fr.position.set(-LX/2+0.5+i*(LX/4.6)+rr(-0.1,0.1), wallTop-0.14, sz*(LZ/2+0.60));
+      fr.rotation.set(sz>0?-0.25:0.25+Math.PI,0,rr(-0.12,0.12));
+      fr.castShadow=true;g.add(fr);}
+  }
+  // охлупень: перекрещенные жерди-«козлы» вдоль конька
+  for(let i=0;i<3;i++){
+    const x=-LX/2+0.6+i*(LX/2-0.1);
+    for(const s of[-1,1]){
+      const p=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.045,1.35,6),logM);
+      p.position.set(x,ridgeY+0.16,s*0.26);p.rotation.x=s*0.5;p.castShadow=true;g.add(p);}
+  }
+  // дверь с косяками (стена z=+LZ/2, к камере после поворота группы)
+  {
+    const dz=LZ/2+0.1;
+    for(const dx of[-0.5,0.5]){const j=log(1.9,0.09,0.085);
+      j.position.set(dx,0.95,dz);g.add(j);}
+    const lin=log(1.35,0.09,0.085);lin.rotation.z=Math.PI/2;
+    const lh=new THREE.Group();lh.add(lin);lh.position.set(0,1.92,dz);g.add(lh);
+    const door=new THREE.Mesh(new THREE.BoxGeometry(0.85,1.6,0.06),
+      new THREE.MeshStandardMaterial({map:wattleT,roughness:1}));
+    door.position.set(0.1,0.88,dz+0.02);door.castShadow=true;g.add(door);
+    const dark=new THREE.Mesh(new THREE.PlaneGeometry(0.95,1.75),
+      new THREE.MeshBasicMaterial({color:0x0f0a05}));
+    dark.position.set(0,0.95,dz-0.06);g.add(dark);
+    // окно со ставнем
+    const wf=new THREE.Mesh(new THREE.PlaneGeometry(0.5,0.42),
+      new THREE.MeshBasicMaterial({color:0x120c06}));
+    wf.position.set(-1.6,1.5,dz+0.01);g.add(wf);
+    const shut=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.46,0.04),
+      new THREE.MeshStandardMaterial({map:barkT,roughness:1}));
+    shut.position.set(-2.12,1.48,dz+0.03);shut.rotation.y=0.35;g.add(shut);
+  }
+  // цоколь-камни
+  for(let i=0;i<20;i++){
+    const t=i/20;
+    const px=(t<0.5? -LX/2+t*2*LX : LX/2-(t-0.5)*2*LX);
+    const pz=(t<0.5? LZ/2+0.12 : -LZ/2-0.12);
+    const s=new THREE.Mesh(new THREE.DodecahedronGeometry(rr(0.14,0.24),0),stoneM);
+    s.position.set(px+rr(-0.1,0.1),rr(0.02,0.08),pz+rr(-0.05,0.05));
+    s.scale.y=rr(0.5,0.8);s.rotation.set(R()*3,R()*3,R()*3);s.castShadow=true;g.add(s);}
+  // контактная тень
+  {
+    const sc2=cnv(128);const sg2=sc2.getContext('2d');
+    const rad2=sg2.createRadialGradient(64,64,26,64,64,64);
+    rad2.addColorStop(0,'rgba(0,0,0,0.30)');rad2.addColorStop(1,'rgba(0,0,0,0)');
+    sg2.fillStyle=rad2;sg2.fillRect(0,0,128,128);
+    const sh2=new THREE.Mesh(new THREE.PlaneGeometry(LX+2.6,LZ+2.6),
+      new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(sc2),transparent:true,depthWrite:false}));
+    sh2.rotation.x=-Math.PI/2;sh2.position.y=0.026;g.add(sh2);
+  }
+  g.scale.setScalar(0.9);g.position.set(10.0,0,2.4);g.rotation.y=-0.55;scene.add(g);
+}
+
+// текстура листвы: пятна листьев + bump
+const leafC=cnv(128);
+{
+  const lg=leafC.getContext('2d');
+  const LL=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(606);
+  lg.fillStyle='#3c5222';lg.fillRect(0,0,128,128);
+  for(let i=0;i<900;i++){
+    lg.fillStyle=`hsl(${88+LL()*26} ${30+LL()*25}% ${18+LL()*22}%)`;
+    lg.beginPath();lg.ellipse(LL()*128,LL()*128,1.5+LL()*3.5,1+LL()*2.5,LL()*3,0,7);lg.fill();}
+}
+const leafT=tex(leafC,2);
+// деревья: корневые лапы, изогнутые ветви, мятые кляксы кроны
+function tree(){
+  const tr=new THREE.Group();
+  // ствол из 3 колен с изломом
+  let px=0,pz=0,py=0,tilt=rr(-0.08,0.08),tz2=rr(-0.08,0.08);
+  const segH=[1.4,1.2,1.0],segR=[0.3,0.22,0.14];
+  const tops=[];
+  for(let s=0;s<3;s++){
+    const seg=new THREE.Mesh(new THREE.CylinderGeometry(segR[s]*0.8,segR[s],segH[s],8),logM);
+    seg.position.set(px+Math.sin(tilt)*segH[s]/2,py+segH[s]/2,pz+Math.sin(tz2)*segH[s]/2);
+    seg.rotation.set(tz2,0,-tilt);seg.castShadow=true;tr.add(seg);
+    px+=Math.sin(tilt)*segH[s];pz+=Math.sin(tz2)*segH[s];py+=segH[s]*Math.cos(Math.max(Math.abs(tilt),Math.abs(tz2)));
+    tilt+=rr(-0.22,0.22);tz2+=rr(-0.22,0.22);tops.push([px,py,pz]);}
+  // корневые лапы у основания
+  for(let rt=0;rt<4;rt++){
+    const a=rt/4*Math.PI*2+rr(-0.3,0.3);
+    const lap=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.16,0.7,6),logM);
+    lap.position.set(Math.cos(a)*0.3,0.16,Math.sin(a)*0.3);
+    lap.rotation.set(Math.sin(a)*0.9,0,-Math.cos(a)*0.9);lap.castShadow=true;tr.add(lap);}
+  // сучья от верхних колен — двухколенные, изогнутые
+  const branchTips=[];
+  for(let b=0;b<6;b++){
+    const [bx,by,bz]=tops[b<2?1:2];
+    const a=rr(0,Math.PI*2),el=rr(0.4,0.9),ln=rr(0.7,1.2);
+    const mx2=bx+Math.cos(a)*Math.cos(el)*ln, my2=by+Math.sin(el)*ln, mz2=bz+Math.sin(a)*Math.cos(el)*ln;
+    const el2=el+rr(0.15,0.5),ln2=rr(0.5,0.9);
+    const ex=mx2+Math.cos(a+rr(-0.5,0.5))*Math.cos(el2)*ln2, ey=my2+Math.sin(el2)*ln2,
+          ez=mz2+Math.sin(a+rr(-0.5,0.5))*Math.cos(el2)*ln2;
+    for(const [p1,p2,r1,r2] of [[[bx,by,bz],[mx2,my2,mz2],0.09,0.055],[[mx2,my2,mz2],[ex,ey,ez],0.05,0.03]]){
+      const ln3=Math.hypot(p2[0]-p1[0],p2[1]-p1[1],p2[2]-p1[2]);
+      const br=new THREE.Mesh(new THREE.CylinderGeometry(r2,r1,ln3,6),logM);
+      br.position.set((p1[0]+p2[0])/2,(p1[1]+p2[1])/2,(p1[2]+p2[2])/2);
+      br.lookAt(p2[0],p2[1],p2[2]);br.rotateX(Math.PI/2);br.castShadow=true;tr.add(br);}
+    branchTips.push([ex,ey,ez]);}
+  // крона: кластеры сплюснутых клякс на концах сучьев и вокруг макушки
+  const [mx,my,mz]=tops[2];branchTips.push([mx,my+0.5,mz]);
+  for(const [ex,ey,ez] of branchTips){
+    const n=3+Math.floor(R()*3);
+    for(let i=0;i<n;i++){
+      const s=rr(0.7,1.25);
+      const bg2=new THREE.IcosahedronGeometry(s,1);
+      const BP=bg2.attributes.position;               // помять кляксу
+      for(let v=0;v<BP.count;v++){
+        const k=1+ (Math.sin(BP.getX(v)*7.1+BP.getY(v)*5.3)*0.5+Math.sin(BP.getZ(v)*9.7)*0.5)*0.16;
+        BP.setXYZ(v,BP.getX(v)*k,BP.getY(v)*k,BP.getZ(v)*k);}
+      bg2.computeVertexNormals();
+      const lowDark=ey<3.2?0.72:1;                    // нижние блобы темнее
+      const bl=new THREE.Mesh(bg2,
+        new THREE.MeshStandardMaterial({map:leafT,bumpMap:leafT,bumpScale:2,
+          color:new THREE.Color().setHSL(0.27+rr(-0.02,0.02),rr(0.4,0.55),rr(0.3,0.42)*lowDark,THREE.SRGBColorSpace),roughness:1}));
+      bl.position.set(ex+rr(-0.35,0.35),ey+rr(-0.35,0.4),ez+rr(-0.35,0.35));
+      bl.scale.set(1,rr(0.72,0.9),1);bl.rotation.set(R()*3,R()*3,R()*3);
+      bl.castShadow=true;tr.add(bl);}}
+  return tr;
+}
+for(const [txp,tzp,ts] of [[-21,-15,1.3],[19,-17,1.5],[-20,10,1.2],[15.5,-2.5,1.05]]){
+  const t=tree();t.scale.setScalar(ts);t.rotation.y=R()*Math.PI*2;
+  t.position.set(txp,0,tzp);scene.add(t);}
+
+renderer.render(scene,camera);
+window.__ready=true;
+</script>
+</body>
+</html>

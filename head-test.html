@@ -1,0 +1,59 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="robots" content="noindex, nofollow">
+<title>Пётр I — лепка портрета (прототип)</title>
+<style>
+  body{margin:0;background:#0d1118;color:#cbd5e1;font:13px system-ui,sans-serif}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+  .cell{position:relative}
+  .cell .cap{position:absolute;left:8px;bottom:6px;font-size:12px;color:#e8d5a8;text-shadow:0 1px 4px #000}
+  canvas{display:block;width:100%;height:auto}
+</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+</head><body>
+<div class="grid" id="grid"></div>
+<script type="module">
+import * as THREE from 'three';
+import { buildPortrait } from './lib/head3d.js';
+
+const W=520, H=680;
+const Q=new URLSearchParams(location.search);
+const CLOSE=Q.get('close')==='1';                   // крупный план лица — для отладки черт
+const SHOTS=[
+  {cap:'анфас, спокоен',      expr:{},                yaw:0.00, pitch:0.00},
+  {cap:'поворот головы',      expr:{},                yaw:0.62, pitch:-0.10},
+  {cap:'улыбка',              expr:{smile:1},         yaw:-0.22, pitch:0.05},
+  {cap:'угрюм',               expr:{grim:1},          yaw:0.10, pitch:0.12},
+];
+
+for(const s of SHOTS){
+  const cell=document.createElement('div'); cell.className='cell';
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H; cell.appendChild(cv);
+  const cap=document.createElement('div'); cap.className='cap'; cap.textContent=s.cap; cell.appendChild(cap);
+  document.getElementById('grid').appendChild(cell);
+
+  const rnd=new THREE.WebGLRenderer({canvas:cv, antialias:true});
+  rnd.setPixelRatio(1); rnd.setSize(W,H,false);
+  rnd.toneMapping=THREE.ACESFilmicToneMapping; rnd.toneMappingExposure=1.05;
+  rnd.outputColorSpace=THREE.SRGBColorSpace;
+
+  const sc=new THREE.Scene();
+  sc.background=new THREE.Color(0x1a2130);
+  const cam=new THREE.PerspectiveCamera(CLOSE?20:28, W/H, 0.1, 100);
+  if(CLOSE){ cam.position.set(0,0.20,6.6); cam.lookAt(0,0.02,0); }
+  else     { cam.position.set(0,0.05,8.2); cam.lookAt(0,-0.30,0); }
+
+  const P=buildPortrait(THREE,{expr:s.expr});
+  P.setPose(s.yaw, s.pitch);
+  P.root.position.y=CLOSE?0.10:0.55;
+  sc.add(P.root);
+
+  // Свет: мягкий ключевой почти в лоб (чтобы нос не резал лицо чёрной тенью), холодная заливка,
+  // тёплый контровой по краю. Теней-карт нет — на портрете они дают грязь.
+  const key=new THREE.DirectionalLight(0xfff0dc, 2.35); key.position.set(-1.7,2.2,4.6); sc.add(key);
+  const fill=new THREE.DirectionalLight(0x8fb4dd, 0.62); fill.position.set(3.2,0.4,2.4); sc.add(fill);
+  const rim=new THREE.DirectionalLight(0xffd9a0, 1.35); rim.position.set(1.9,1.5,-3.0); sc.add(rim);
+  sc.add(new THREE.AmbientLight(0x46566e, 0.62));
+
+  rnd.render(sc,cam);
+}
+window.__ready=true;
+</script></body></html>

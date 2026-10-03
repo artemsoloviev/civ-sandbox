@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Просьба к поисковикам не индексировать и не показывать страницу -->
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+<meta name="googlebot" content="noindex, nofollow">
+<meta name="yandex" content="none">
+<meta name="referrer" content="no-referrer">
+<title>Карта</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         background:#f4f2ee; color:#2b2b2b; }
+  @media (prefers-color-scheme: dark) { body { background:#16181c; color:#e8e6e3; } }
+  .gate { min-height:100dvh; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .box { width:100%; max-width:360px; text-align:center; }
+  h1 { font-size:19px; font-weight:600; margin:0 0 6px; }
+  p.sub { margin:0 0 20px; font-size:14px; opacity:.65; }
+  input { width:100%; box-sizing:border-box; padding:13px 14px; font-size:16px;
+          border:1px solid rgba(128,128,128,.45); border-radius:10px; background:transparent;
+          color:inherit; }
+  input:focus { outline:2px solid #c8a02a; outline-offset:1px; }
+  button { width:100%; margin-top:10px; padding:13px; font-size:16px; font-weight:600;
+           border:0; border-radius:10px; background:#c8a02a; color:#1a1a1a; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:default; }
+  select { width:100%; box-sizing:border-box; margin-top:10px; padding:12px 10px;
+           font-size:15px; border:1px solid rgba(128,128,128,.45); border-radius:10px;
+           background:transparent; color:inherit; }
+  select option { color:#2b2b2b; }
+  .pdflink { display:inline-block; margin-top:14px; font-size:15px; color:#8a6d12; }
+  /* Ссылка на APK — ДО пароля: в машине пароль вводить неудобно, а адрес в Яндекс.Браузере
+     руками не набрать (строка не показывает ввод). Тап по закладке «Карта» → сразу качается. */
+  .apk { display:block; margin-top:18px; padding:12px; font-size:15px; font-weight:600;
+         text-decoration:none; border:1px solid rgba(128,128,128,.45); border-radius:10px;
+         color:inherit; }
+  .msg { margin-top:12px; font-size:14px; min-height:20px; }
+  .err { color:#c0392b; }
+  @media (prefers-color-scheme: dark) { .err { color:#ff7a6b; } }
+  iframe { border:0; width:100%; height:100dvh; display:block; }
+</style>
+</head>
+<body>
+<div class="gate" id="gate">
+  <div class="box">
+    <h1>🗺️ Поездка</h1>
+    <p class="sub">Страница закрыта паролем</p>
+    <form id="f">
+      <input id="pw" type="password" placeholder="Пароль" autocomplete="current-password" autofocus>
+      <select id="what">
+        <option value="trip-gl-full.enc" selected>🗺️ Новая карта — слои и фильтры, с фото</option>
+        <option value="trip-full.enc">↩️ Старая карта, с фото</option>
+        <option value="plan.enc">📄 Подробный план поездки (PDF)</option>
+      </select>
+      <button id="go" type="submit">Открыть</button>
+    </form>
+    <div class="msg" id="msg"></div>
+    <a class="apk" id="apk" href="https://artemsoloviev.github.io/civ-sandbox/m.apk"
+       download="travel-map.apk">📲 Скачать приложение «Карта» для магнитолы (1,2 МБ)</a>
+    <a class="apk" id="apk2" href="#">⬇️ Не качается? Запасной способ</a>
+    <!-- Проверка: качает ли браузер магнитолы хоть что-нибудь. Если и этот файл в 8 байт
+         не появляется в «Загрузках» — дело не в APK, а в менеджере загрузок/разрешениях.
+         16.08.2026: txt скачался, apk — нет ⇒ браузер режет именно установочные файлы. -->
+    <a class="apk" id="apk3" href="https://artemsoloviev.github.io/civ-sandbox/t.txt"
+       download="t.txt">🧪 Проверка: скачать крошечный файл (8 байт)</a>
+    <!-- Обход блокировки: тот же самый APK, но под расширением .bin (браузер видит
+         обычный файл, а не «приложение»). После скачивания переименовать в .apk. -->
+    <a class="apk" id="apk4" href="https://artemsoloviev.github.io/civ-sandbox/m.bin"
+       download="travel-map.bin">🥷 Обход: скачать тот же файл как m.bin</a>
+    <!-- 16.08.2026 выяснено: текст качается любого размера (1,2 МБ прошли), а .apk и .bin —
+         нет ⇒ браузер магнитолы режет по ТИПУ файла. Отдаём тот же APK как text/plain. -->
+    <!-- Качаем ТЕКСТОВЫЙ файл (браузер его пропускает), но сохраняем сразу под именем .apk:
+         фильтр у браузера, похоже, по типу ответа, а не по имени. Если имя тоже режется —
+         вторая кнопка сохраняет как .txt, дальше переименование. -->
+    <a class="apk" id="apk7" href="https://artemsoloviev.github.io/civ-sandbox/m.txt"
+       download="travel-map.apk">📄 Скачать приложение (текстом, сохранить как .apk)</a>
+    <a class="apk" id="apk8" href="https://artemsoloviev.github.io/civ-sandbox/m.txt"
+       download="m.txt">📄 То же, но сохранить как m.txt</a>
+    <!-- Лесенка: 1,2 МБ текстом не сохраняется, 8 байт сохраняются ⇒ у загрузчика прошивки
+         есть потолок по размеру. Ищем его, чтобы собрать APK меньше потолка. -->
+    <a class="apk" href="https://artemsoloviev.github.io/civ-sandbox/s100.txt" download="s100.txt">📏 100 КБ</a>
+    <a class="apk" href="https://artemsoloviev.github.io/civ-sandbox/s300.txt" download="s300.txt">📏 300 КБ</a>
+    <a class="apk" href="https://artemsoloviev.github.io/civ-sandbox/s600.txt" download="s600.txt">📏 600 КБ</a>
+    <a class="apk" href="https://artemsoloviev.github.io/civ-sandbox/s1000.txt" download="s1000.txt">📏 1 МБ</a>
+    <div class="msg" id="apkmsg"></div>
+  </div>
+</div>
+
+<script>
+// Расшифровка происходит прямо в браузере: сервер пароля не знает и никуда его не шлёт.
+const ITER = 250000;
+const gate = document.getElementById("gate"), msg = document.getElementById("msg"),
+      go = document.getElementById("go");
+
+// Новая карта — векторная (MapLibre), её рисует видеочип через WebGL. В головных
+// устройствах машин WebGL часто выключен, и тогда вместо карты был белый экран:
+// скрипт падал на первой же строке. Проверяем заранее и молча отдаём старую карту
+// (Leaflet, обычные картинки-плитки) — она работает где угодно.
+function hasWebGL() {
+  try {
+    const c = document.createElement("canvas");
+    return !!(c.getContext("webgl") || c.getContext("experimental-webgl") || c.getContext("webgl2"));
+  } catch (e) { return false; }
+}
+const GL_FALLBACK = {"trip-gl-full.enc": "trip-full.enc"};
+
+document.getElementById("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById("pw").value;
+  if (!pw) return;
+  go.disabled = true;
+  msg.className = "msg";
+  msg.textContent = "Загружаю…";
+  try {
+    let file = document.getElementById("what").value;
+    let swapped = false;
+    if (GL_FALLBACK[file] && !hasWebGL()) {
+      file = GL_FALLBACK[file];
+      swapped = true;
+    }
+    const isPdf = file === "plan.enc";
+    const buf = new Uint8Array(await (await fetch(file, {cache: "no-store"})).arrayBuffer());
+    const salt = buf.slice(0, 16), iv = buf.slice(16, 28), body = buf.slice(28);
+    msg.textContent = "Расшифровываю…";
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw),
+                                               "PBKDF2", false, ["deriveKey"]);
+    const key = await crypto.subtle.deriveKey(
+      {name: "PBKDF2", salt, iterations: ITER, hash: "SHA-256"},
+      base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
+    const plain = await crypto.subtle.decrypt({name: "AES-GCM", iv}, key, body);
+    const url = URL.createObjectURL(
+      new Blob([plain], {type: isPdf ? "application/pdf" : "text/html"}));
+    const frame = document.createElement("iframe");
+    frame.src = url;
+    document.body.innerHTML = "";
+    document.body.appendChild(frame);
+    if (swapped) {
+      // Подменили молча, но не втихую: иначе непонятно, почему карта выглядит иначе.
+      const note = document.createElement("div");
+      note.textContent = "ℹ️ В этом браузере нет WebGL — открыл старую карту. Закрыть";
+      note.style.cssText = "position:fixed;left:0;right:0;bottom:0;text-align:center;" +
+        "padding:10px;background:#c8a02a;color:#1a1a1a;font-weight:600;font-size:14px;cursor:pointer";
+      note.onclick = () => note.remove();
+      document.body.appendChild(note);
+    }
+    if (isPdf) {
+      // На айфоне PDF внутри рамки иногда не показывается — даём прямую ссылку,
+      // она открывает файл штатной листалкой на весь экран.
+      const a = document.createElement("a");
+      a.href = url; a.target = "_blank"; a.className = "pdflink";
+      a.textContent = "📄 Не видно план? Открыть PDF отдельно";
+      a.style.cssText = "position:fixed;left:0;right:0;bottom:0;text-align:center;" +
+        "padding:11px;background:#c8a02a;color:#1a1a1a;font-weight:600;text-decoration:none";
+      document.body.appendChild(a);
+    }
+  } catch (err) {
+    msg.className = "msg err";
+    msg.textContent = "Не открылось — проверь пароль.";
+    go.disabled = false;
+  }
+});
+
+// Запасной способ скачать APK. В браузере магнитолы обычный клик по ссылке на .apk
+// иногда молча не делает НИЧЕГО (тип файла блокируется). Тогда тянем файл сами
+// и отдаём как безымянный blob — такое скачивание проходит там, где прямое не идёт.
+document.getElementById("apk2").addEventListener("click", async (e) => {
+  e.preventDefault();
+  const am = document.getElementById("apkmsg");
+  am.className = "msg";
+  am.textContent = "Качаю файл… (1,2 МБ)";
+  try {
+    // Тянем ТЕКСТОВУЮ копию (m.txt): установочный тип браузер магнитолы режет.
+    const r = await fetch("https://artemsoloviev.github.io/civ-sandbox/m.txt", {cache: "no-store"});
+    const blob = new Blob([await r.arrayBuffer()], {type: "text/plain"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "travel-map.apk";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    am.textContent = "Готово — файл в «Загрузках» браузера, открой его и ставь.";
+  } catch (err) {
+    am.className = "msg err";
+    am.textContent = "Не вышло: " + err;
+  }
+});
+</script>
+</body>
+</html>
