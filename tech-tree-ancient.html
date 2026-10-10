@@ -1,0 +1,123 @@
+<meta name="robots" content="noindex, nofollow"><title>Древний мир — зависимости (Генезис)</title>
+<style>
+  :root{
+    --bg:#efe6d2; --panel:#f6f0e2; --card:#fffdf7; --ink:#2b2114; --muted:#6f6555; --line:#cdbf9f;
+    --accent:#b9862b; --war:#c25a38; --eco:#5a9146; --build:#3f9d93; --know:#3f79bd; --trade:#c2932f;
+    --shadow:0 5px 14px #00000016;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#141b26; --panel:#1b2431; --card:#232f3f; --ink:#e9eff8; --muted:#93a3b8; --line:#33465c;
+    --accent:#e0b256; --war:#e07351; --eco:#74b45c; --build:#54b3a8; --know:#5e97d6; --trade:#dcb055; --shadow:0 6px 16px #0000004d;}}
+  :root[data-theme="light"]{
+    --bg:#efe6d2; --panel:#f6f0e2; --card:#fffdf7; --ink:#2b2114; --muted:#6f6555; --line:#cdbf9f;
+    --accent:#b9862b; --war:#c25a38; --eco:#5a9146; --build:#3f9d93; --know:#3f79bd; --trade:#c2932f; --shadow:0 5px 14px #00000016;}
+  :root[data-theme="dark"]{
+    --bg:#141b26; --panel:#1b2431; --card:#232f3f; --ink:#e9eff8; --muted:#93a3b8; --line:#33465c;
+    --accent:#e0b256; --war:#e07351; --eco:#74b45c; --build:#54b3a8; --know:#5e97d6; --trade:#dcb055; --shadow:0 6px 16px #0000004d;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,sans-serif;line-height:1.32}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 14px 60px}
+  .bar{background:var(--panel);border-bottom:1px solid var(--line);padding:12px 16px 11px}
+  .bar-in{max-width:1092px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .title{font-family:Georgia,serif;font-size:20px;font-weight:700;margin:0;display:flex;align-items:center;gap:9px}
+  .flask{width:20px;height:22px;color:var(--accent)}
+  .rate{font-size:13px;color:var(--muted)}
+  .spacer{flex:1}
+  .x{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:15px;cursor:pointer}
+  .note{max-width:1092px;margin:9px auto 0;font-size:12px;color:var(--muted)}
+  .heads{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:12px 0 4px}
+  .head{border-radius:9px;padding:7px 5px;text-align:center;font-weight:700;font-size:12.5px;color:#fff;display:flex;align-items:center;justify-content:center;gap:5px;border:1px solid #0002}
+  .head.war{background:var(--war)} .head.eco{background:var(--eco)} .head.build{background:var(--build)} .head.know{background:var(--know)} .head.trade{background:var(--trade)}
+  .era-head{display:flex;align-items:center;gap:12px;margin:12px 0 8px}
+  .era-head::before,.era-head::after{content:'';height:1px;background:var(--line);flex:1}
+  .era-name{font-family:Georgia,serif;font-weight:700;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);white-space:nowrap}
+
+  .gridwrap{position:relative}
+  #links{position:absolute;left:0;top:0;z-index:0;pointer-events:none;overflow:visible}
+  .link{fill:none;stroke-width:1.8;opacity:.75;stroke-linejoin:round;stroke-linecap:round}
+  .link.war{stroke:var(--war)} .link.eco{stroke:var(--eco)} .link.build{stroke:var(--build)} .link.know{stroke:var(--know)} .link.trade{stroke:var(--trade)}
+  .grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(5,1fr);column-gap:10px;row-gap:40px;align-items:start}
+  .node{grid-row-end:span 1;background:var(--card);border:1px solid var(--line);border-top:3px solid var(--nc,var(--line));border-radius:10px;padding:8px 10px;box-shadow:var(--shadow);transition:transform .1s}
+  .node:hover{transform:translateY(-2px)}
+  .node.war{--nc:var(--war)} .node.eco{--nc:var(--eco)} .node.build{--nc:var(--build)} .node.know{--nc:var(--know)} .node.trade{--nc:var(--trade)}
+  .n-top{display:flex;align-items:center;gap:6px}
+  .n-ico{font-size:16px;line-height:1}
+  .n-name{font-weight:700;font-size:12.5px}
+  .n-hint{font-size:10.5px;color:var(--muted);margin-top:3px}
+  .n-hint i{opacity:.8}
+  .node.pick{position:relative;border-color:var(--accent);box-shadow:0 0 0 1.5px var(--accent),var(--shadow)}
+  .node.pick::after{content:'выбрать';position:absolute;top:-8px;right:7px;font-size:9px;font-weight:700;color:#2a1c05;background:var(--accent);padding:1px 6px;border-radius:9px}
+  @media (prefers-reduced-motion:reduce){.node{transition:none}}
+  @media (max-width:760px){.heads{grid-template-columns:repeat(1,1fr)}.grid{grid-template-columns:repeat(2,1fr)}#links{display:none}}
+</style>
+
+<div class="bar">
+  <div class="bar-in">
+    <h1 class="title"><svg class="flask" viewBox="0 0 24 24" aria-hidden="true"><rect x="8.7" y="2.1" width="6.6" height="2.7" rx="1.05" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10.1 4.8v4.3L4.6 19a1.8 1.8 0 0 0 1.6 2.8h11.6a1.8 1.8 0 0 0 1.6-2.8l-5.5-9.9V4.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M7.35 13.5h9.3l2.75 5.5a1.8 1.8 0 0 1-1.6 2.8H6.2a1.8 1.8 0 0 1-1.6-2.8z" fill="currentColor" opacity=".88"/></svg> Древний мир — зависимости</h1>
+    <span class="rate">прототип связей</span>
+    <span class="spacer"></span>
+    <button class="x" title="закрыть (в игре)">✕</button>
+  </div>
+  <div class="note">Зависимая наука стоит <b>вровень</b> со своей предпосылкой (не выше), в своей ветке. Пример: Стрельба из лука — слева напротив Скотоводства; Бронза — слева напротив Горного дела; Каменная кладка и Колесо — справа от него. Линии идут через промежутки, не пересекая чужие карточки.</div>
+</div>
+
+<div class="wrap">
+  <div class="heads">
+    <div class="head war">🛡️ Военное</div>
+    <div class="head eco">🌾 Хозяйство</div>
+    <div class="head build">🏛️ Строительство</div>
+    <div class="head know">📜 Знания</div>
+    <div class="head trade">⚖️ Торговля</div>
+  </div>
+
+  <div class="era-head"><span class="era-name">Древний мир</span></div>
+
+  <div class="gridwrap">
+    <svg id="links" aria-hidden="true"></svg>
+    <div class="grid" id="grid">
+      <!-- строка 1 -->
+      <div class="node war" style="grid-column:1;grid-row:1" id="t-bronze" data-theme="war" data-prereq="mining"><div class="n-top"><span class="n-ico">🗡️</span><span class="n-name">Обработка бронзы</span></div><div class="n-hint">Бронзовое оружие, лагерь.</div></div>
+      <div class="node eco pick" style="grid-column:2;grid-row:1" id="t-mining" data-theme="eco"><div class="n-top"><span class="n-ico">⛏️</span><span class="n-name">Горное дело</span></div><div class="n-hint">Камень и руда → рудник.</div></div>
+      <div class="node build" style="grid-column:3;grid-row:1" id="t-masonry" data-theme="build" data-prereq="mining"><div class="n-top"><span class="n-ico">🧱</span><span class="n-name">Каменная кладка</span></div><div class="n-hint">Стены, пирамиды.</div></div>
+      <div class="node know pick" style="grid-column:4;grid-row:1" id="t-astrology" data-theme="know"><div class="n-top"><span class="n-ico">✨</span><span class="n-name">Астрология</span></div><div class="n-hint">Звёзды → святилище.</div></div>
+      <div class="node trade pick" style="grid-column:5;grid-row:1" id="t-sailing" data-theme="trade"><div class="n-top"><span class="n-ico">⛵</span><span class="n-name">Мореплавание</span></div><div class="n-hint">Лодки → галера.</div></div>
+      <!-- строка 2 -->
+      <div class="node eco pick" style="grid-column:2;grid-row:2" id="t-pottery" data-theme="eco"><div class="n-top"><span class="n-ico">🏺</span><span class="n-name">Гончарное дело</span></div><div class="n-hint">Глина → амбар.</div></div>
+      <div class="node build" style="grid-column:3;grid-row:2" id="t-wheel" data-theme="build" data-prereq="mining"><div class="n-top"><span class="n-ico">☸️</span><span class="n-name">Колесо</span></div><div class="n-hint">Телеги, мельница.</div></div>
+      <div class="node know" style="grid-column:4;grid-row:2" id="t-writing" data-theme="know" data-prereq="pottery"><div class="n-top"><span class="n-ico">📖</span><span class="n-name">Письменность</span></div><div class="n-hint">Запись → библиотека.</div></div>
+      <!-- строка 3 -->
+      <div class="node eco" style="grid-column:2;grid-row:3" id="t-irrigation" data-theme="eco" data-prereq="pottery"><div class="n-top"><span class="n-ico">💧</span><span class="n-name">Ирригация</span></div><div class="n-hint">Орошение полей.</div></div>
+      <!-- строка 4 -->
+      <div class="node war" style="grid-column:1;grid-row:4" id="t-archery" data-theme="war" data-prereq="husbandry"><div class="n-top"><span class="n-ico">🏹</span><span class="n-name">Стрельба из лука</span></div><div class="n-hint">Лучники.</div></div>
+      <div class="node eco pick" style="grid-column:2;grid-row:4" id="t-husbandry" data-theme="eco"><div class="n-top"><span class="n-ico">🐄</span><span class="n-name">Скотоводство</span></div><div class="n-hint">Скот → пастбище.</div></div>
+      <!-- строка 5 -->
+      <div class="node eco" style="grid-column:2;grid-row:5" id="t-craft" data-theme="eco"><div class="n-top"><span class="n-ico">🔨</span><span class="n-name">Ремесленное дело</span></div><div class="n-hint">Ремёсла и мастера. <i>(инст.)</i></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function drawLinks(){
+    var wrap=document.querySelector('.gridwrap'), svg=document.getElementById('links');
+    if(!wrap||!svg) return;
+    var box=wrap.getBoundingClientRect();
+    svg.setAttribute('width',wrap.scrollWidth); svg.setAttribute('height',wrap.scrollHeight);
+    while(svg.firstChild) svg.removeChild(svg.firstChild);
+    document.querySelectorAll('.node[data-prereq]').forEach(function(n){
+      var nb=n.getBoundingClientRect();
+      var dcx=nb.left-box.left+nb.width/2, dtop=nb.top-box.top;
+      n.getAttribute('data-prereq').split(',').forEach(function(pid){
+        var p=document.getElementById('t-'+pid); if(!p) return;
+        var pb=p.getBoundingClientRect();
+        var pcx=pb.left-box.left+pb.width/2, pbot=pb.bottom-box.top;
+        var chY=pbot+18;                       // канал в промежутке под рядом предпосылки
+        var d='M'+pcx+' '+pbot+' L '+pcx+' '+chY+' L '+dcx+' '+chY+' L '+dcx+' '+dtop;
+        var path=document.createElementNS('http://www.w3.org/2000/svg','path');
+        path.setAttribute('d',d); path.setAttribute('class','link '+n.getAttribute('data-theme'));
+        svg.appendChild(path);
+      });
+    });
+  }
+  window.addEventListener('load',function(){ drawLinks(); setTimeout(drawLinks,180); });
+  window.addEventListener('resize',drawLinks);
+</script>
