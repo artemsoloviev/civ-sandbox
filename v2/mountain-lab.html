@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Лаборатория горы</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script type="importmap">{"imports":{"three":"../vendor/three.module.js","three/addons/":"../vendor/jsm/"}}</script>
+<style>
+body{margin:0;overflow:hidden;font:13px/1.4 -apple-system,sans-serif;background:#222}
+#p{position:fixed;right:10px;top:10px;width:260px;background:rgba(20,24,28,.92);color:#dde;
+  border-radius:10px;padding:12px 14px;z-index:5;max-height:calc(100vh - 40px);overflow:auto}
+#p label{display:block;margin:7px 0 2px}
+#p input[type=range]{width:100%}
+#p .v{float:right;opacity:.7}
+#copy,#dice{margin-top:10px;width:100%;padding:8px;border:0;border-radius:7px;font-weight:700;cursor:pointer}
+#copy{background:#3c7;color:#042}
+#dice{background:#49c;color:#031}
+#out{margin-top:8px;font:11px monospace;word-break:break-all;background:#111;border-radius:6px;
+  padding:6px;max-height:70px;overflow:auto;user-select:all}
+h3{margin:0 0 4px}
+</style></head><body>
+<div id="p">
+  <h3>Горы — ползунки</h3>
+  <div id="sl"></div>
+  <button id="dice">🎲 Другой вариант</button>
+  <button id="copy">Скопировать настройки</button>
+  <div id="out"></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x9db8c9);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight); renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap; document.body.appendChild(renderer.domElement);
+const camera=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.1,500);
+camera.position.set(0,15,33);
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.target.set(0,2.5,0); controls.enableDamping=true;
+
+// свет — как в игре
+const sun=new THREE.DirectionalLight(0xfff2da,2.1);
+sun.position.set(28,40,30); sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048); sun.shadow.radius=4;
+Object.assign(sun.shadow.camera,{left:-34,right:34,top:34,bottom:-34,near:2,far:140});
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xcfe0ec,0x6a5b3a,0.6));
+
+const TL=new THREE.TextureLoader();
+function photoMat(id,rep,tint){
+  const c=TL.load('../visual2/tex/'+id+'_c.jpg'); c.colorSpace=THREE.SRGBColorSpace;
+  c.wrapS=c.wrapT=THREE.RepeatWrapping; c.repeat.set(rep,rep); c.anisotropy=8;
+  const n=TL.load('../visual2/tex/'+id+'_n.jpg');
+  n.wrapS=n.wrapT=THREE.RepeatWrapping; n.repeat.set(rep,rep);
+  return new THREE.MeshStandardMaterial({map:c,normalMap:n,roughness:1,color:tint||0xffffff});
+}
+// земля
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(110,110),photoMat('Grass004',32));
+ground.rotation.x=-Math.PI/2; ground.position.y=-0.02; ground.receiveShadow=true; scene.add(ground);
+// ёлки для масштаба (~1.4 м)
+for(const [ex,ez] of [[-7,7],[8,6],[12,-6],[-12,-6],[4,9],[-2,8],[14,4],[-15,5]]){
+  const tr=new THREE.Group();
+  const k1=new THREE.Mesh(new THREE.ConeGeometry(0.5,1.2,7),new THREE.MeshStandardMaterial({color:0x2c5a2e}));
+  k1.position.y=0.8; const k2=k1.clone(); k2.scale.set(0.7,0.7,0.7); k2.position.y=1.35;
+  const st=new THREE.Mesh(new THREE.CylinderGeometry(0.07,0.09,0.5),new THREE.MeshStandardMaterial({color:0x5a4228}));
+  st.position.y=0.22; tr.add(st,k1,k2); tr.position.set(ex,0,ez);
+  tr.traverse(o=>o.castShadow=true); scene.add(tr);
+}
+
+// ===== параметры (дефолт = выбор Артёма 03.10) =====
+const P={
+  height:   {v:5.7, min:3,   max:8,   step:0.1, name:'Высота, м'},
+  sharp:    {v:1.4, min:0.55,max:1.8, step:0.01,name:'Острота пика (меньше=острее)'},
+  base:     {v:0.73,min:0.25,max:0.9, step:0.01,name:'Ширина подножия'},
+  peaks:    {v:3,   min:1,   max:4,   step:1,   name:'Вершин'},
+  ribs:     {v:7,   min:0,   max:9,   step:1,   name:'Рёбер'},
+  ribAmp:   {v:0.26,min:0,   max:0.35,step:0.01,name:'Глубина рёбер'},
+  rough:    {v:0.37,min:0,   max:0.5, step:0.01,name:'Шершавость склонов'},
+  vary:     {v:0.55,min:0,   max:1,   step:0.01,name:'ВАРИАТИВНОСТЬ гор'},
+  link:     {v:0.6, min:0,   max:1,   step:0.01,name:'ХРЕБЕТ: слитность'},
+  snowFrac: {v:0.75,min:0.4, max:0.95,step:0.01,name:'Снег: линия (больше = меньше)'},
+  snowJag:  {v:0.15,min:0,   max:0.5, step:0.01,name:'Снег: зубцы'},
+  rockLight:{v:0.82,min:0.25,max:1.4, step:0.01,name:'Светлость камня'},
+  footGreen:{v:0.55,min:0,   max:1,   step:0.01,name:'Зелень у подножия'},
+};
+const sl=document.getElementById('sl');
+for(const k in P){ const o=P[k];
+  const l=document.createElement('label');
+  l.innerHTML=o.name+' <span class="v" id="v_'+k+'">'+o.v+'</span>';
+  const r=document.createElement('input');
+  Object.assign(r,{type:'range',min:o.min,max:o.max,step:o.step,value:o.v});
+  r.oninput=()=>{o.v=+r.value;document.getElementById('v_'+k).textContent=r.value;queue();};
+  sl.append(l,r);
+}
+document.getElementById('copy').onclick=()=>{
+  const j=JSON.stringify(Object.fromEntries(Object.entries(P).map(([k,o])=>[k,o.v])));
+  document.getElementById('out').textContent=j;
+  navigator.clipboard&&navigator.clipboard.writeText(j).catch(()=>{});
+};
+document.getElementById('dice').onclick=()=>{ seed0=(Math.random()*1e9)|0; build(); };
+
+// ===== генератор (тот же, что пойдёт в игру) =====
+const rockMat=photoMat('Rock030',2.2); rockMat.vertexColors=true;
+const snowMat2=new THREE.MeshStandardMaterial({color:0xf4f7fb,roughness:0.92,vertexColors:true});
+let mnt=null, seed0=42, seed=42;
+function rnd(){ seed=(seed*1103515245+12345)%2147483648; return seed/2147483648; }
+const RAD=4.4;                       // масштабная единица: base=0.73 → ширина ядра ~3.2 м
+function makeMountain(cx,cz,scale){  // одна гора = свои параметры: база Артёма ± разброс
+  const V=P.vary.v, rr=a=>1+(rnd()*2-1)*a*V;
+  const H=P.height.v*scale*rr(0.75); // как в игре v11: высоты сильно разные
+  const sharp=Math.max(0.6,P.sharp.v*rr(0.35));
+  const base=P.base.v*scale*rr(0.25);
+  const nPk=Math.max(1,Math.min(5,Math.round(P.peaks.v+(rnd()*2-1)*V*1.8)));
+  const ribs=Math.max(2,Math.round(P.ribs.v+(rnd()*2-1)*V*3));
+  const ribAmp=Math.max(0,P.ribAmp.v*rr(0.6));
+  const phi=rnd()*Math.PI*2;
+  const pks=[{x:cx,z:cz,H,s:base}];
+  for(let i=1;i<nPk;i++){ const a=rnd()*Math.PI*2, d=(0.35+rnd()*0.3)*RAD*base;
+    pks.push({x:cx+Math.cos(a)*d,z:cz+Math.sin(a)*d,H:H*(0.5+rnd()*0.3),s:base*(0.6+rnd()*0.3)}); }
+  return {H,sharp,base,ribs,ribAmp,phi,pks,top:pks[0],
+    snowy:H>=P.height.v*0.89};       // как в игре: низкой горе шапка не положена
+}
+let MTS=[],RIDGES=[];
+function layout(){                   // цепь из 4 гор + одиночка справа
+  seed=seed0; MTS=[]; RIDGES=[];
+  const L=P.link.v;
+  let x=-11.5, z=1.2;
+  const chain=[];
+  for(const sc of [0.9,1.0,0.8,0.95]){
+    const m=makeMountain(x,z,sc); chain.push(m); MTS.push(m);
+    x+=(5.9-2.1*L)*(0.88+rnd()*0.24)*P.base.v/0.73;  // слитность сближает горы
+    z+=(rnd()*2-1)*1.6;
+  }
+  for(let i=0;i<chain.length-1;i++){ const A=chain[i].top,B=chain[i+1].top;
+    RIDGES.push({ax:A.x,az:A.z,bx:B.x,bz:B.z,Ha:chain[i].H,Hb:chain[i+1].H,
+      s:(chain[i].base+chain[i+1].base)*0.5*0.55,sh:(chain[i].sharp+chain[i+1].sharp)*0.5,
+      snowy:chain[i].snowy&&chain[i+1].snowy}); }
+  MTS.push(makeMountain(12.5,-3.5,0.82));            // отдельная гора — для сравнения
+}
+function fld(x,z){                   // поле высот: max по ядрам пиков + гребни-сёдла
+  let h=0,ribv=0,dBest=1e9;
+  for(const m of MTS){ for(const p of m.pks){
+    const th=Math.atan2(z-p.z,x-p.x);
+    const rib=1+m.ribAmp*Math.sin(th*m.ribs+m.phi);
+    const sW=p.s*RAD;
+    const d=Math.hypot((x-p.x)/(sW*rib),(z-p.z)/(sW*rib*0.88));
+    if(m.snowy){ const dp=Math.hypot((x-p.x)/sW,(z-p.z)/(sW*0.88))*(P.height.v/p.H); // гладкое расстояние до вершины — для снега
+      if(dp<dBest)dBest=dp; }
+    const hp=p.H*Math.exp(-1.9*Math.pow(d,m.sharp));
+    if(hp>h){h=hp;ribv=Math.sin(th*m.ribs+m.phi);} } }
+  const L=P.link.v;
+  if(L>0.02)for(const r of RIDGES){  // седловина между соседними вершинами цепи
+    const dx=r.bx-r.ax,dz=r.bz-r.az,L2=dx*dx+dz*dz||1;
+    let t=((x-r.ax)*dx+(z-r.az)*dz)/L2; t=Math.max(0,Math.min(1,t));
+    const Ht=(r.Ha+(r.Hb-r.Ha)*t)*(1-0.2*Math.sin(t*Math.PI))*(0.25+0.68*L); // провал 20% как в игре v11
+    const dP=Math.hypot(x-(r.ax+dx*t),z-(r.az+dz*t))/(r.s*RAD);
+    const hp=Ht*Math.exp(-1.9*Math.pow(dP,r.sh));
+    if(hp>h){h=hp;ribv=0;}
+    if(r.snowy){ const dR=dP*(P.height.v/Ht);  // снег ЛЕНТОЙ вдоль оси гребня, как в игре v11
+      if(dR<dBest)dBest=dR; } }
+  h+=P.rough.v*(Math.sin(x*4.8+z*3.9)+Math.sin(x*8.4-z*6.6))*0.5*Math.min(1,h/1.5);
+  return [Math.max(0,h),ribv,dBest];
+}
+const W=38,D=18,NX=266,NZ=126;       // одна общая плоскость — горы могут перетекать
+const mk=(snow)=>{
+  const geo=new THREE.PlaneGeometry(W,D,NX,NZ); geo.rotateX(-Math.PI/2);
+  const pos=geo.attributes.position, uv=geo.attributes.uv, cols=[];
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i), z=pos.getZ(i);
+    const f=fld(x,z); let y=f[0]-0.25;
+    if(snow){ const jag=Math.sin(x*4.8+z*3.9)*0.5+Math.sin(x*2+z*2.9)*0.5;
+      const dS=(1-P.snowFrac.v)*2.4*Math.max(0.15,1+P.snowJag.v*jag*3); // шапка по РАДИУСУ от вершины
+      y=(f[2]<dS&&f[0]>1.0)?y+0.06:y-0.45; }                            // кроет рёбра и ложбины
+    pos.setY(i,y);
+    uv.setXY(i,(x+W/2)/12,(z+D/2)/12);  // период рисунка ~5.5 м — как в игре v12
+    if(snow)cols.push(1,1,1);
+    else { const k=P.rockLight.v*(0.68+0.32*Math.max(0,f[1]));          // светлость — прямой множитель 0.25..1.4
+      let r=k,g2=k*0.95,b2=k*0.88;
+      if(f[0]<1.3){ const t=Math.min(1,(1.3-f[0])/1.3)*P.footGreen.v;   // зелень: глушим красный/синий, подымаем зелёный
+        r*=1-0.4*t; g2*=1+0.3*t; b2*=1-0.55*t; }
+      cols.push(r,g2,b2); } }
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));
+  geo.computeVertexNormals(); return geo;
+};
+function build(){
+  if(mnt){scene.remove(mnt); mnt.traverse(o=>{if(o.geometry)o.geometry.dispose();});}
+  layout();
+  const m1=new THREE.Mesh(mk(false),rockMat); m1.castShadow=m1.receiveShadow=true;
+  const m2=new THREE.Mesh(mk(true),snowMat2); m2.castShadow=true;
+  mnt=new THREE.Group(); mnt.add(m1,m2); scene.add(mnt);
+}
+let tq=null; function queue(){ clearTimeout(tq); tq=setTimeout(build,140); }
+build();
+window.LAB={P,build,reseed:s=>{seed0=s;build();}};   // для стенда
+(function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene,camera);
+  window.__ready=true; })();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);});
+</script></body></html>

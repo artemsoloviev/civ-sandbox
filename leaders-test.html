@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8"><meta name="robots" content="noindex, nofollow">
+<title>Портреты лидеров — сравнение стилей</title>
+<style>
+  body{margin:0;padding:26px 20px;background:linear-gradient(180deg,#0e1726,#0a111c);
+    font-family:system-ui,sans-serif;color:#eaf1fb}
+  h1{font-size:19px;letter-spacing:.5px;margin:0 0 4px;color:#ffe1a0;text-align:center}
+  .sub{text-align:center;opacity:.55;font-size:12.5px;margin-bottom:22px}
+  .row{display:flex;gap:18px;justify-content:center;margin-bottom:26px;flex-wrap:wrap}
+  .cell{text-align:center}
+  .cell .cap{margin-top:8px;font-size:13px;font-weight:700;color:#ffe9c2}
+  .cell .ep{font-size:11px;opacity:.55}
+  .lbl{text-align:center;font-size:12px;letter-spacing:2px;text-transform:uppercase;
+    color:#f4cd7e;opacity:.75;margin:0 0 12px}
+</style>
+<h1>Портреты лидеров</h1>
+<div class="sub">три варианта: нынешний плоский · гравюра на медали · живописный портрет</div>
+
+<div class="lbl">было — плоский стиль</div>
+<div class="row" id="flat"></div>
+
+<div class="lbl">вариант 2 — гравюра на медали</div>
+<div class="row" id="eng"></div>
+
+<div class="lbl">вариант 3 — живописный портрет</div>
+<div class="row" id="paint"></div>
+
+<script type="module">
+  import { portrait } from './lib/faces.js?v=2';
+  import { portraitEngraved } from './lib/faces-engraved.js?v=3';
+  import { portraitPainted } from './lib/faces-painted.js?v=2';
+  const L=[['peter1','Пётр I','Великий'],['catherine2','Екатерина II','Великая'],
+           ['napoleon','Наполеон I','Бонапарт'],['louis14','Людовик XIV','Король-Солнце']];
+  const put=(host,make,size)=>L.forEach(([id,nm,ep])=>{
+    const c=document.createElement('div'); c.className='cell';
+    c.appendChild(make(id,size));
+    c.insertAdjacentHTML('beforeend',`<div class="cap">${nm}</div><div class="ep">${ep}</div>`);
+    document.getElementById(host).appendChild(c);
+  });
+  put('flat', portrait, 150);
+  put('eng',  portraitEngraved, 190);
+  put('paint', portraitPainted, 190);
+  window.__ready=true;
+</script>

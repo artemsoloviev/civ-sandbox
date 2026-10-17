@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Модели — Новая цивилизация</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#bfd3da;font:14px/1.35 -apple-system,system-ui,sans-serif}
+canvas{display:block}
+#side{position:fixed;left:10px;top:10px;bottom:10px;width:230px;overflow:auto;z-index:5;background:#1f262dcc;color:#e6ecf1;
+  border-radius:10px;padding:10px 10px 12px;box-sizing:border-box;backdrop-filter:blur(4px)}
+#side h1{font-size:15px;margin:0 0 8px}
+#side h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#9fb0bd;margin:12px 0 5px;cursor:pointer}
+#side h2.on{color:#ffd27a}
+#side button{display:block;width:100%;text-align:left;margin:2px 0;padding:5px 8px;border:0;border-radius:6px;background:#ffffff14;color:#e6ecf1;
+  font:inherit;cursor:pointer}
+#side button:hover{background:#ffffff2a}
+#side button.on{background:#ffd27a;color:#1f262d}
+#info{position:fixed;right:10px;top:10px;z-index:5;background:#1f262dcc;color:#e6ecf1;border-radius:10px;padding:8px 12px;max-width:330px}
+#info b{color:#ffd27a}
+#hint{position:fixed;right:10px;bottom:10px;z-index:5;background:#1f262daa;color:#cfd8df;border-radius:8px;padding:6px 10px;font-size:12px}
+.lab{position:fixed;z-index:4;transform:translate(-50%,-100%);background:#1f262dd9;color:#fff;border-radius:6px;padding:2px 7px;font-size:12px;
+  white-space:nowrap;pointer-events:auto;cursor:pointer}
+.lab.on{background:#ffd27a;color:#1f262d}
+#ctl{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:6;display:none;gap:6px;background:#1f262dcc;padding:6px;border-radius:10px}
+#ctl button{border:0;border-radius:7px;padding:7px 12px;background:#ffffff1c;color:#e6ecf1;font:inherit;cursor:pointer}
+#ctl button.on{background:#ffd27a;color:#1f262d}
+#err{position:fixed;left:250px;bottom:10px;z-index:6;max-width:50vw;font:11px/1.35 ui-monospace,monospace;background:#7a1010ee;color:#fff;
+  padding:5px 9px;border-radius:7px;white-space:pre-wrap;display:none}
+</style>
+<script>
+(function(){ let n=0; const add=t=>{ const e=document.getElementById('err'); if(!e)return; n++; e.style.display='block';
+    if(n<=8)e.textContent+=(n>1?'\n— ':'— ')+String(t).slice(0,600); };
+  const ce=console.error.bind(console); console.error=(...a)=>{ add(a.map(x=>x&&x.stack?x.stack:x).join(' ')); ce(...a); };
+  addEventListener('error',e=>add((e.message||'')+' @'+(e.filename||'').split('/').pop()+':'+e.lineno));
+  addEventListener('unhandledrejection',e=>add('promise: '+(e.reason&&e.reason.stack||e.reason)));
+  window.__errN=()=>n; })();
+</script>
+<script type="importmap">{"imports":{"three":"../vendor/three.module.js","three/addons/":"../vendor/jsm/"}}</script>
+</head>
+<body>
+<div id="side"><h1>Модели игры</h1><div id="menu"></div></div>
+<div id="info">Собираю…</div>
+<div id="hint">мышь: левая — вращать, правая — двигать, колесо — ближе/дальше · клик по подписи — к модели</div>
+<div id="err"></div>
+<div id="ctl"></div>
+<script type="module">
+// 15.10: просмотрщик моделей. Модели — из общего kit.js (те же, что в игре big.html); земля плоская, вода — только у причала.
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
+import {makeKit} from './kit.js?v=7';
+import {makeUnits} from './units.js?v=7';
+
+const R=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(20260928);
+const hash=(a,b)=>{let h=(a|0)*374761393+(b|0)*668265263;h=(h^(h>>>13))*1274126177;return ((h^(h>>>16))>>>0)/4294967296;};
+function mergeGeos(gs){ let nv=0; for(const g of gs)nv+=g.attributes.position.count;
+  const out=new THREE.BufferGeometry();
+  for(const name of['position','normal','uv','color']){ if(!gs[0].attributes[name])continue;
+    const sz=gs[0].attributes[name].itemSize, arr=new Float32Array(nv*sz); let o=0;
+    for(const g of gs){ const a=g.attributes[name]; if(a)arr.set(a.array,o); o+=g.attributes.position.count*sz; }
+    out.setAttribute(name,new THREE.BufferAttribute(arr,sz)); }
+  return out; }
+let SHORE=1e9;                                         // правее SHORE — вода (для причала)
+let RIVX=null, RIVW=1.5;                               // ось речки по Z (для рыбацкого стана на реке), ширина русла
+const ground=(x,z)=>x>SHORE?-1.2:(RIVX!==null&&Math.abs(x-RIVX)<RIVW/2?-1.2:0);
+const KIT=makeKit({THREE,mergeGeometries,R,TL:new THREE.TextureLoader(),hash,HEXR:3.2,heightAt:ground,riverD:(x,z)=>RIVX===null?99:Math.abs(x-RIVX),RV:()=>RIVX===null?0:1,
+  wdx:(a,b)=>a-b,mergeGeos,trailNear:()=>false});
+const K=KIT, HEXR=3.2;
+const U=makeUnits({THREE,R},KIT);                       // 16.10: войска — люди на шарнирах, бой
+
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xbfd3da);
+const camera=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,0.05,600);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.18;
+document.body.appendChild(renderer.domElement);
+const sun=new THREE.DirectionalLight(0xfff2da,2.1); sun.castShadow=true; sun.shadow.mapSize.set(4096,4096); sun.shadow.radius=4;
+scene.add(sun,sun.target); scene.add(new THREE.HemisphereLight(0xcfe0ec,0x6a5b3a,0.6));
+const controls=new OrbitControls(camera,renderer.domElement); controls.enableDamping=true; controls.maxPolarAngle=Math.PI*0.49;
+addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+
+// ---- каталог: группы → модели. sp — шаг между моделями в ряду (м), hex — рисовать контур гекса (масштаб клетки)
+const prop=(o,s=0.72)=>{ o.scale.multiplyScalar(s); return o; };
+const ST=['стоянка','деревушка','деревня','город'];
+const CAT=[
+  {id:'settle',name:'Поселения по ступеням',sp:7.6,hex:true,items:[
+    ...ST.map((n,i)=>({n:n+(i===1?' (старт)':''),f:(x,z)=>K.mkSettle(x,z,{stg:i,cap:null})})),
+    ...[1,2,3].map(i=>({n:'столица — '+ST[i],f:(x,z)=>K.mkSettle(x,z,{stg:i,cap:'me',capCol:'#3a6fc4'})}))]},
+  {id:'build',name:'Постройки',sp:3.4,items:[
+    {n:'хата',f:()=>K.mkHut(0.72)},{n:'сруб',f:()=>K.mkCabin(0.72)},{n:'дом вождя',f:()=>K.mkLonghouse(0.72)},
+    {n:'общинный дом',f:()=>K.mkLonghouse(0.62,true)},{n:'амбар на сваях',f:()=>K.mkGranary(0.75)},{n:'гончарная печь',f:()=>K.mkKiln(0.8)},
+    {n:'менгир',f:()=>K.mkMenhir(0.8)},{n:'стог',f:()=>K.mkHay(0.75)},{n:'стяг державы',f:()=>K.mkStag('#3a6fc4',0.8)},
+    {n:'костёр',f:()=>prop(K.mkFire())},{n:'шкура на рамке',f:()=>prop(K.mkHide())},{n:'дрова',f:()=>prop(K.mkWoodpile())},
+    {n:'корзина',f:()=>prop(K.mkBasket(1))},{n:'сноп',f:()=>prop(K.mkSheaf(),0.68)}]},
+  {id:'farm',name:'Хозяйство деревни',sp:7.6,hex:true,shore:true,items:[
+    {n:'загон',f:(x,z)=>K.mkPen({x,z,col:1,row:1,pen:{vx:x,vz:z+6}}),world:true},
+    {n:'пашня',f:(x,z)=>K.mkFarm({x,z,col:3,row:5}),world:true},
+    {n:'пашня (другой сид)',f:(x,z)=>K.mkFarm({x,z,col:8,row:2}),world:true},
+    {n:'причал',f:(x,z)=>K.mkDock({x,z,dock:{vx:x-4,vz:z}}),world:true,dock:true}]},
+  {id:'ind',name:'Промыслы столицы',sp:7.6,hex:true,items:[
+    {n:'стан охотника (лес)',f:(x,z)=>K.mkIndB('hunt',x,z),world:true},
+    {n:'лесная делянка (лес)',f:(x,z)=>K.mkIndB('lumber',x,z),world:true},
+    {n:'каменоломня (холмы)',f:(x,z)=>K.mkIndB('quarry',x,z),world:true},
+    {n:'рыбацкий стан (берег реки)',f:(x,z)=>K.mkIndB('fish',x,z),world:true,river:2.4}]},
+  {id:'ani',name:'Животные',sp:1.0,items:[
+    ...[0,1,2,3].map(i=>({n:'корова',f:()=>K.mkCow()})),...[0,1,2].map(i=>({n:'овца',f:()=>K.mkSheep()}))]},
+  {id:'tree',name:'Деревья и камни',sp:3.0,items:[
+    {n:'дуб / берёза',f:()=>K.mkTree(1)},{n:'сосна / ель',f:()=>K.mkPine(1)},{n:'пиния',f:()=>K.mkSPine(1)},{n:'пальма',f:()=>K.mkPalm(1)},
+    {n:'сухостой',f:()=>K.mkSnag(1)},{n:'акация',f:()=>K.mkAcacia(1)},{n:'камень',f:()=>K.mkRock(0.6)}]},
+  {id:'units',name:'Войска',sp:2.6,cam:0.5,ctl:'units',items:[
+    {n:'разведчик',f:()=>U.mkUnit('scout')},{n:'дружина',f:()=>U.mkUnit('band')},{n:'варвары',f:()=>U.mkUnit('raid')},
+    {n:'стойбище варваров',f:()=>U.mkCamp()}]},
+  {id:'battle',name:'Сражение',sp:7.6,hex:true,cam:0.24,ctl:'battle',items:[{n:'дружина × варвары',f:()=>U.mkBattle({win:'a'})}]},
+];
+// settle/farm собираются в мировых координатах (сами читают высоту земли), прочие — в нуле и сдвигаются
+CAT[0].items.forEach(it=>it.world=true);
+
+const menu=document.getElementById('menu'), info=document.getElementById('info');
+let cur=null, objs=[], labs=[], groundM=null, waterM=null, hexes=null, sel=-1;
+const disposeAll=()=>{ for(const o of objs){ scene.remove(o.g); o.g.traverse(m=>{ if(m.geometry)m.geometry.dispose(); }); }
+  objs=[]; labs.forEach(l=>l.remove()); labs=[];
+  for(const m of[groundM,waterM,hexes])if(m){ scene.remove(m); m.traverse(o=>{ if(o.geometry)o.geometry.dispose(); }); } groundM=waterM=hexes=null; };
+const triOf=g=>{ let t=0; g.traverse(o=>{ if(o.isMesh){ const gg=o.geometry; t+=(gg.index?gg.index.count:gg.attributes.position.count)/3; } }); return Math.round(t); };
+
+function show(ci){ disposeAll(); cur=CAT[ci]; sel=-1;
+  [...menu.querySelectorAll('h2')].forEach((h,i)=>h.classList.toggle('on',i===ci));
+  const n=cur.items.length, cols=n<=4?n:Math.ceil(n/2), rows=Math.ceil(n/cols), x0=-(cols-1)*cur.sp/2, z0=-(rows-1)*cur.sp/2;   // сетка: до 2 рядов
+  const XY=i=>[x0+(i%cols)*cur.sp, z0+Math.floor(i/cols)*cur.sp];
+  SHORE=cur.shore?x0+(cols-1)*cur.sp-1.0:1e9;              // берег — между последней деревней и причалом
+  { const ri=cur.items.findIndex(it=>it.river); RIVX=ri<0?null:XY(ri)[0]+cur.items[ri].river; }   // речка справа от стана
+  const W=(n-1)*cur.sp+cur.sp*3+200, D=220;
+  { const L0=-W/2, R0=cur.shore?SHORE:W/2, segs=RIVX===null?[[L0,R0]]:[[L0,RIVX-RIVW/2],[RIVX+RIVW/2,R0]];   // у речки земля — двумя кусками
+    groundM=new THREE.Group(); scene.add(groundM);
+    for(const [a,b] of segs){ const gw=b-a;
+      const gg=new THREE.PlaneGeometry(gw,D); gg.rotateX(-Math.PI/2);
+      const gm=K.M.grass.clone(); for(const k of['map','normalMap','aoMap'])if(gm[k]){ gm[k]=gm[k].clone(); gm[k].repeat.set(gw/2.2,D/2.2); gm[k].needsUpdate=true; }
+      gg.setAttribute('uv1',gg.attributes.uv);
+      const m=new THREE.Mesh(gg,gm); m.position.x=(a+b)/2; m.receiveShadow=true; groundM.add(m); }
+    if(RIVX!==null){ const dirt=new THREE.MeshStandardMaterial({color:0x5b4a36,roughness:1,side:THREE.DoubleSide});
+      const bed=new THREE.Mesh(new THREE.PlaneGeometry(RIVW,D),dirt); bed.rotation.x=-Math.PI/2; bed.position.set(RIVX,-1.2,0); groundM.add(bed);
+      for(const s2 of[-1,1]){ const w=new THREE.Mesh(new THREE.PlaneGeometry(D,1.2),dirt); w.rotation.y=Math.PI/2; w.position.set(RIVX+s2*RIVW/2,-0.6,0); groundM.add(w); }
+      const wm=new THREE.Mesh(new THREE.PlaneGeometry(RIVW,D),K.M.water); wm.rotation.x=-Math.PI/2; wm.position.set(RIVX,-0.62,0); groundM.add(wm); } }
+  if(cur.shore){ const wg=new THREE.PlaneGeometry(cur.sp*3,D); wg.rotateX(-Math.PI/2);
+    waterM=new THREE.Mesh(wg,K.M.water); waterM.position.set(SHORE+cur.sp*1.5,-0.62,0); scene.add(waterM);
+  }
+  if(cur.hex){ const pts=[]; for(let i=0;i<n;i++){ const [cx,cz]=XY(i); if(cur.items[i].dock)continue;
+      for(let k=0;k<6;k++){ const a=Math.PI/6+k*Math.PI/3, b=Math.PI/6+(k+1)*Math.PI/3;
+        pts.push(cx+Math.cos(a)*HEXR,0.03,cz+Math.sin(a)*HEXR, cx+Math.cos(b)*HEXR,0.03,cz+Math.sin(b)*HEXR); } }
+    const hg=new THREE.BufferGeometry(); hg.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+    hexes=new THREE.LineSegments(hg,new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.55})); scene.add(hexes); }
+  let tot=0, ms=0;
+  cur.items.forEach((it,i)=>{ const [x,z]=XY(i), t0=performance.now();
+    let g=it.world?it.f(x,z):it.f();
+    const dt=performance.now()-t0; ms+=dt;
+    if(!g){ g=new THREE.Group(); }
+    g.position.x+=x; g.position.z+=z;                                   // сборщики kit отдают группу в местных координатах клетки (как в big.html decTick)
+    g.traverse(o=>{ if(o.isMesh&&!o.userData.noSh){ o.castShadow=true; o.receiveShadow=true; } });
+    scene.add(g);
+    const box=new THREE.Box3().setFromObject(g), sz=box.isEmpty()?1:box.getSize(new THREE.Vector3()).length();
+    const top=box.isEmpty()?1:box.max.y, tri=triOf(g); tot+=tri;
+    objs.push({g,x,z,top,sz,tri,ms:dt,n:it.n,u:g.userData});
+    const l=document.createElement('div'); l.className='lab'; l.textContent=it.n; l.onclick=()=>focus(i); document.body.appendChild(l); labs.push(l); });
+  const span=Math.max((cols-1)*cur.sp+cur.sp,(rows-1)*cur.sp*1.6+cur.sp);
+  sun.position.set(span*0.3+20,40,30); sun.target.position.set(0,0,0);
+  Object.assign(sun.shadow.camera,{left:-span*0.7-6,right:span*0.7+6,top:span*0.5+8,bottom:-span*0.5-8,near:1,far:200}); sun.shadow.camera.updateProjectionMatrix();
+  const sh=span*0.2*Math.min(1,240/innerWidth*4);          // кадр чуть левее: левую четверть закрывает панель
+  controls.target.set(-sh,0,0); const d=Math.max(span*1.05,cur.sp*2.2)*(cur.cam||1);
+  camera.position.set(-sh,d*0.62,d*0.8); controls.update();
+  info.innerHTML=`<b>${cur.name}</b><br>${n} шт · ${tot.toLocaleString('ru')} треуг. · сборка ${Math.round(ms)} мс<br><span style="color:#9fb0bd">клик по подписи — крупно</span>`;
+  [...menu.querySelectorAll('button')].forEach(b=>b.classList.toggle('on',+b.dataset.c===ci&&+b.dataset.i===-1));
+  ctlFor(cur.ctl);
+  try{ history.replaceState(null,'','#'+cur.id); }catch(e){} }
+
+// 16.10: камера боя «как в Циве» (Артём): в схватку — подлёт вплотную, после боя — немного отъезжает.
+// Тронул мышью — камера твоя до следующего боя.
+let camCh=null;
+function camReset(){ const o=objs.find(q=>q.u&&q.u.center); if(!o){ camCh=null; return; }
+  const d=new THREE.Vector3().subVectors(camera.position,controls.target).normalize();
+  camCh={o,dir:d,base:camera.position.distanceTo(controls.target),off:false}; }
+controls.addEventListener('start',()=>{ if(camCh)camCh.off=true; });
+function camTick(dt){ if(!camCh||camCh.off)return; const t=camCh.o.u.time();
+  if(t<1.0)return;                                                  // начало — общий план: видно, кто на кого идёт
+  const c=camCh.o.u.center(), dist=t<4.9?2.1:3.0, k=1-Math.exp(-dt*(t<4.9?2.4:1.6));
+  const tx=c.x+camCh.o.g.position.x, tz=c.z+camCh.o.g.position.z;
+  controls.target.x+=(tx-controls.target.x)*k; controls.target.y+=(0.24-controls.target.y)*k; controls.target.z+=(tz-controls.target.z)*k;
+  const cur=camera.position.distanceTo(controls.target), nd=cur+(dist-cur)*k;
+  camera.position.copy(controls.target).addScaledVector(camCh.dir,nd); }
+// 16.10: кнопки анимации войск — стойка/шаг; бой с выбором исхода (бой — заново с начала)
+const ctl=document.getElementById('ctl');
+function ctlFor(kind){ camCh=null; ctl.innerHTML=''; ctl.style.display=kind?'flex':'none'; if(!kind)return;
+  const B=(t,fn,on)=>{ const b=document.createElement('button'); b.textContent=t; if(on)b.classList.add('on');
+    b.onclick=()=>{ [...ctl.children].forEach(x=>x.classList.remove('on')); b.classList.add('on'); fn(); }; ctl.appendChild(b); };
+  if(kind==='units'){ B('Стойка',()=>objs.forEach(o=>{ o.u.dig&&o.u.dig(false); o.u.mode&&o.u.mode('idle'); }),true); B('Шаг',()=>objs.forEach(o=>{ o.u.dig&&o.u.dig(false); o.u.mode&&o.u.mode('walk'); })); B('Окопаться',()=>objs.forEach(o=>o.u.dig&&o.u.dig(true))); }   // 17.10: вид «окопалась» (C)
+  if(kind==='battle'){ const go=w=>{ if(camCh&&camCh.home){ camera.position.copy(camCh.home[0]); controls.target.copy(camCh.home[1]); controls.update(); }
+      objs[0].u.restart(w); camReset(); camCh.home=[camera.position.clone(),controls.target.clone()]; };
+    B('Бой: дружина побеждает',()=>go('a'),true); B('Бой: варвары побеждают',()=>go('b')); camReset(); if(camCh)camCh.home=[camera.position.clone(),controls.target.clone()]; } }
+
+function focus(i){ const o=objs[i]; sel=i; if(camCh)camCh.off=true;
+  labs.forEach((l,k)=>l.classList.toggle('on',k===i));
+  const r=Math.max(1.2,o.sz*0.75);
+  controls.target.set(o.x,o.top*0.35,o.z); camera.position.set(o.x+r*0.55,o.top*0.35+r*0.6,o.z+r*1.05); controls.update();
+  info.innerHTML=`<b>${o.n}</b> — ${cur.name.toLowerCase()}<br>${o.tri.toLocaleString('ru')} треуг. · сборка ${Math.round(o.ms)} мс<br><span style="color:#9fb0bd">клик по заголовку группы слева — вся группа</span>`;
+  [...menu.querySelectorAll('button')].forEach(b=>b.classList.toggle('on',CAT[+b.dataset.c]===cur&&+b.dataset.i===i)); }
+
+CAT.forEach((c,ci)=>{ const h=document.createElement('h2'); h.textContent=c.name; h.onclick=()=>show(ci); menu.appendChild(h);
+  c.items.forEach((it,i)=>{ const b=document.createElement('button'); b.textContent=it.n; b.dataset.c=ci; b.dataset.i=i;
+    b.onclick=()=>{ if(cur!==c)show(ci); focus(i); }; menu.appendChild(b); }); });
+
+const v=new THREE.Vector3();
+let tPrev=performance.now();
+(function loop(){ requestAnimationFrame(loop); controls.update();
+  const now=performance.now(), dt=Math.min(0.1,(now-tPrev)/1000); tPrev=now;
+  if(!window.__upause){ for(const o of objs)if(o.u&&o.u.upd)o.u.upd(dt); camTick(dt); }   // __upause — запись кадров стендом шагами
+  objs.forEach((o,i)=>{ const l=labs[i]; v.set(o.x,o.top+0.25,o.z).project(camera);
+    if(v.z>1||Math.abs(v.x)>1.1||Math.abs(v.y)>1.1){ l.style.display='none'; return; }
+    l.style.display=''; l.style.left=((v.x*0.5+0.5)*innerWidth)+'px'; l.style.top=((-v.y*0.5+0.5)*innerHeight)+'px'; });
+  renderer.render(scene,camera); })();
+const start=Math.max(0,CAT.findIndex(c=>'#'+c.id===location.hash));
+show(start);
+window.__units={dig:on=>{ objs.forEach(o=>o.u.dig&&o.u.dig(on)); return objs.filter(o=>o.u.dig).length; },seek:(t,win)=>{ const o=objs.find(q=>q.u&&q.u.seek); if(o){ o.u.seek(t,win); camReset(); return o.u.state(); } },
+  cam:(px,py,pz,tx,ty,tz)=>{ camera.position.set(px,py,pz); controls.target.set(tx,ty,tz); controls.update(); },
+  mode:m=>objs.forEach(o=>o.u&&o.u.mode&&o.u.mode(m)), step:(t)=>{ const n=Math.round(t*30); for(let i=0;i<n;i++){ objs.forEach(o=>o.u&&o.u.upd&&o.u.upd(1/30)); camTick(1/30); } }};
+window.__models=()=>({cat:cur.id,шт:objs.length,треуг:objs.map(o=>o.tri),мс:objs.map(o=>Math.round(o.ms)),ошибок:window.__errN()});
+</script>
+</body>
+</html>
