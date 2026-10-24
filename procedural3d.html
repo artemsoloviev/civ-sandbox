@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grad · значки-поселения в настоящем 3D (рисуются кодом)</title>
+<style>
+  html,body{margin:0;height:100%;background:#cfe3f2;font-family:system-ui,sans-serif;overflow:hidden}
+  #c{display:block;width:100%;height:100%}
+  .panel{position:fixed;top:12px;left:12px;max-width:430px;background:#ffffffee;border-radius:12px;
+         padding:12px 15px;box-shadow:0 3px 12px #0003;color:#20303a;font-size:13.5px;line-height:1.45}
+  .panel b{color:#1a6b3f}.panel h1{margin:0 0 6px;font-size:16px;color:#16324a}
+  .back{position:fixed;top:14px;right:16px;background:#fff;border:1px solid #cdd7de;border-radius:8px;
+        padding:6px 12px;text-decoration:none;color:#334;font-size:13px;box-shadow:0 1px 4px #0002;z-index:5}
+  #hint{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);background:#20303aee;color:#fff;
+        padding:7px 14px;border-radius:20px;font-size:13px}
+</style>
+</head>
+<body>
+<a class="back" href="index.html">← к списку</a>
+<canvas id="c"></canvas>
+<div class="panel">
+  <h1>Поселения — 3D из кода (с окнами)</h1>
+  Геометрию рисует <b>код из простых фигур</b>, ни одной скачанной модели. Ряды слева-направо — стадии роста;
+  вглубь — эпохи. Теперь у домов <b>светящиеся окна</b>. Хочешь увидеть природу и дороги — открой «Кусок мира» в меню.
+</div>
+<div id="hint">тяни мышью — поворот · колесо — зум · сцена вращается сама</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { cluster, label } from './lib/kit.js';
+
+const renderer=new THREE.WebGLRenderer({canvas:c,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.05;
+
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xcfe3f2);
+scene.fog=new THREE.Fog(0xcfe3f2,55,95);
+const camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,300); camera.position.set(0,26,34);
+const controls=new OrbitControls(camera,renderer.domElement); controls.target.set(0,1.5,0);
+controls.enableDamping=true; controls.autoRotate=true; controls.autoRotateSpeed=0.5; controls.maxPolarAngle=Math.PI*0.49;
+
+scene.add(new THREE.HemisphereLight(0xdff0ff,0x557040,0.9));
+const sun=new THREE.DirectionalLight(0xfff2d8,1.5); sun.position.set(18,30,14); sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048); const d=34; Object.assign(sun.shadow.camera,{left:-d,right:d,top:d,bottom:-d,near:1,far:90}); scene.add(sun);
+
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(120,120),new THREE.MeshStandardMaterial({color:0x8fb25c,roughness:1}));
+ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
+
+const EPOCHS=[['prehistoric','Первобыт'],['medieval','Средневековье'],['modern','Современность'],['future','Будущее']];
+const SIZES=['Зарождение','Деревня','Город','Столица'];
+const COLX=[-13.5,-4.5,4.5,13.5], ROWZ=[-12,-4,4,12];
+EPOCHS.forEach(([key,name],ri)=>{
+  SIZES.forEach((_,ci)=>{ const c=cluster(key,ci+1); c.position.set(COLX[ci],0,ROWZ[ri]); scene.add(c); });
+  const lb=label(name,{color:'#123'}); lb.position.set(-22,2.4,ROWZ[ri]); scene.add(lb);
+});
+SIZES.forEach((s,ci)=>{ const lb=label(s,{color:'#2a3b30'}); lb.position.set(COLX[ci],2.2,-18.5); scene.add(lb); });
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+(function loop(){requestAnimationFrame(loop);controls.update();renderer.render(scene,camera);})();
+window.__ready=true;
+</script>
+</body>
+</html>

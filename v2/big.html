@@ -1,0 +1,2192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Новая цивилизация — песочница-стратегия</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#a8bcc6}canvas{display:block}</style>
+<script>
+// 14.10 ПЛАШКА ОШИБОК (диагностика «чёрной земли» в Safari): всё, что браузер пишет в консоль как ошибку,
+// и ошибки шейдеров three.js — красной плашкой внизу экрана. Пусто — серое «ошибок нет».
+(function(){ const box=document.createElement('div'); let n=0,tb=false;
+  const st=document.createElement('div'), er=document.createElement('div'); box.append(st,er);   // st — счётчик текстур, er — ошибки
+  box.style.cssText='position:fixed;left:250px;bottom:10px;z-index:500;max-width:52vw;max-height:40vh;overflow:auto;font:11px/1.35 ui-monospace,monospace;'+
+    'background:#2a2f36cc;color:#cfd6df;padding:5px 9px;border-radius:7px;white-space:pre-wrap;pointer-events:auto;display:none';   // 23.10: скрыта, пока нет сбоя — перекрывала интерфейс
+  er.textContent='ошибок нет';
+  const red=()=>{ box.style.background='#7a1010ee'; box.style.color='#fff'; box.style.display='block'; };
+  const add=t=>{ n++; if(n===1){ er.textContent=''; red(); }
+    if(n<=12) er.textContent+=(n>1?'\n— ':'— ')+String(t).slice(0,900); else if(n===13) er.textContent+='\n…'; };
+  window.__errTex=(t,bad)=>{ st.textContent=t; if(bad&&!tb){ tb=true; red(); } };   // красное не снимается: увидеть, что сбой был
+  const ce=console.error.bind(console); console.error=(...a)=>{ add(a.map(x=>x&&x.stack?x.stack:x).join(' ')); ce(...a); };
+  const cw=console.warn.bind(console); console.warn=(...a)=>{ const t=a.join(' '); if(/WebGLProgram|shader|GL_|context|texture/i.test(t)&&!/deprecated/i.test(t))add('warn: '+t); cw(...a); };
+  addEventListener('error',e=>add((e.message||'')+' @'+(e.filename||'').split('/').pop()+':'+e.lineno));
+  addEventListener('unhandledrejection',e=>add('promise: '+(e.reason&&e.reason.stack||e.reason)));
+  const put=()=>document.body?document.body.appendChild(box):setTimeout(put,50); put();
+  window.__errBox=()=>({n,tex:st.textContent,text:er.textContent});
+})();
+</script>
+<script type="importmap">{"imports":{"three":"../vendor/three.module.js","three/addons/":"../vendor/jsm/"}}</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
+import {makeKit} from './kit.js?v=7';
+import {makeUnits} from './units.js?v=9';
+import {initGame,pickStarts} from './game.js?v=53';   // 14.10: игровой слой — столица, ходы, интерфейс старого движка
+
+const R=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(20260928);
+const rr=(a,b)=>a+(b-a)*R();
+const hash=(a,b)=>{let h=(a|0)*374761393+(b|0)*668265263;h=(h^(h>>>13))*1274126177;return ((h^(h>>>16))>>>0)/4294967296;};
+
+// ================= ТЕКСТУРЫ =================
+const texMan=new THREE.LoadingManager();
+const TL=new THREE.TextureLoader(texMan);
+// 15.10 СЧЁТЧИК ТЕКСТУР на плашке ошибок: «N из M (размеры)»; не дошла / пустая / дольше 25 с — красным с именем.
+// Повод: 14.10 земля была чёрной без единой ошибки, к вечеру прошло само — следующий раз поймать одним скрином.
+const TEXS={};
+const texShow=()=>{ const v=Object.values(TEXS), ok=v.filter(t=>t.st==='ok'), bad=v.filter(t=>t.st==='bad'), late=v.filter(t=>t.late);
+  const sz=[...new Set(ok.map(t=>t.w+'×'+t.h))].join(', '), net=Math.max(0,...ok.map(t=>t.net||0));
+  window.__errTex&&window.__errTex(`текстуры: ${ok.length} из ${v.length}`+(sz?` (${sz})`:'')+(net?`, последняя пришла на ${(net/1000).toFixed(1)} с от открытия`:'')+
+    (bad.length?' · НЕТ: '+bad.map(t=>t.id).join(', '):'')+(late.length?' · дольше 25 с: '+late.map(t=>t.id).join(', '):''),
+    bad.length>0||late.length>0); };
+const _tlLoad=TL.load.bind(TL);
+TL.load=(url,onL,onP,onE)=>{ const id=url.split('/').pop(); TEXS[url]={id,st:'wait'}; texShow();
+  const netEnd=()=>{ const e=performance.getEntriesByName(new URL(url,location.href).href)[0]; return e&&e.responseEnd>0?e.responseEnd:0; };
+  // опоздание — по приходу файла из сети: уведомление о загрузке может ждать занятый сборкой мира главный поток (стенд: все 21 «опоздали»)
+  setTimeout(()=>{ if(TEXS[url].st==='wait'&&!netEnd()){ TEXS[url].late=true; texShow(); } },25000);
+  return _tlLoad(url,t=>{ const im=t.image, w=im&&(im.naturalWidth||im.width)||0, h=im&&(im.naturalHeight||im.height)||0;
+      TEXS[url]={id,st:w&&h?'ok':'bad',w,h,net:netEnd(),late:TEXS[url].late}; texShow(); onL&&onL(t); },
+    onP,e=>{ TEXS[url]={id,st:'bad',late:TEXS[url].late}; texShow(); onE&&onE(e); }); };
+// 15.10: модели (текстуры, материалы, деревья, постройки, животные, пашня, ступени поселений) — в общем kit.js; их же показывает models.html
+const KIT=makeKit({THREE,mergeGeometries,R,TL,hash,HEXR:3.2,heightAt:(x,z,n)=>heightAt(x,z,n),riverD:(x,z)=>riverD(x,z),RV:()=>RV,
+  wdx:(a,b)=>wdx(a,b),mergeGeos:gs=>mergeGeos(gs),trailNear:(x,z,r)=>TRAILS.near(x,z,r)});
+const UNITS3=makeUnits({THREE,R},KIT);                 // 16.10: войска (люди на шарнирах, бой) — те же, что в models.html
+const {M,addReeds,cnv,tex,leafT,leafMottleTexB,photoMat,mkTree,mkPine,mkSPine,mkPalm,mkSnag,mkAcacia,mkRock,mkPen,mkFarm,mkDock,mkSheaf,mkSettle,mkIndB}=KIT;
+// ================= СЦЕНА =================
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0xbfd3da);
+scene.fog=new THREE.Fog(0xbfd3da,70,190);
+const camera=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,0.1,400);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.5)); // Retina 2x душила пиксельный шейдер земли
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.18;
+document.body.appendChild(renderer.domElement);
+const sun=new THREE.DirectionalLight(0xfff2da,2.1);
+sun.position.set(28,40,30);sun.castShadow=true;
+sun.shadow.mapSize.set(4096,4096);sun.shadow.radius=4;
+Object.assign(sun.shadow.camera,{left:-42,right:42,top:42,bottom:-42,near:2,far:130});
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xcfe0ec,0x6a5b3a,0.6));
+
+// ================= СПЛОШНОЕ ПОЛОТНО (как в циве: гекс — логика, земля непрерывна) =================
+const HEXR=3.2;                 // радиус гекса (по вершинам)
+// проба рек/дорог: ?rv=0 русло-вода | 1 нарисованная лента | 2 лента+блики; ?rd=0 как было | 1 чёткий тракт | 2 протоптанная тропа
+const Q0=new URLSearchParams(location.search);
+const RV=+(Q0.get('rv')||4), RD=+(Q0.get('rd')||0);   // река rv4 — утверждённый вид
+// ================= КАРТА 112×84 (средняя прошлого движка), КОЛЬЦО по X =================
+// Генератор БУКВ в тех же тайлах; кусок 9×9 с деревней — в центре как есть.
+const COLS=112, ROWS=84;
+const PER=(x,f,ph)=>Math.sin(x*2*Math.PI*f/COLS+ph);     // периодические гармоники по колонкам
+const h2d=(a,b)=>{let h=(a|0)*374761393+(b|0)*668265263;h=(h^(h>>>13))*1274126177;return ((h^(h>>>16))>>>0)/4294967296;};
+function fbmP(c,r,f0,oct){ let v=0,amp=1,f=f0,sum=0;      // шум, честно замкнутый по колонкам
+  for(let o=0;o<oct;o++){ v+=amp*(PER(c,f,o*1.7)*Math.cos(r*0.11*f+o)+PER(c,f*1.7,o*2.3+1)*Math.sin(r*0.07*f+2*o));
+    sum+=amp; amp*=0.55; f*=1.9; }
+  return v/sum; }
+const PIECE=[
+"n n n n m p w w w","n t m m m p f w w","t t p m g f2 w w w",
+"h h g f v f2 mh w w","g g g f f2 g mh w w","g d d g g g w w w",
+"sv sv sv d g j j w w","s s sv sv j j w w w","s s s sv j w w w w"].map(r=>r.split(' '));
+const PR0=Math.floor(ROWS/2)-4, PC0=Math.floor(COLS/2)-4;   // кусок в центре
+function cellType(c,r){
+  if(r>=PR0&&r<PR0+9&&c>=PC0&&c<PC0+9) return PIECE[r-PR0][c-PC0];
+  const lat=Math.abs(r-(ROWS-1)/2)/((ROWS-1)/2);            // 0 экватор … 1 полюс
+  const wet=0.65*fbmP(c,r,3,4)+0.35*fbmP(c+11,r*1.7+7,7,3), rough=fbmP(c+37,r*1.13+11,5,3); // влажность из двух масштабов: сухие зоны пятнами
+  const sea=fbmP(c+73,r*0.9+51,2,4);
+  if(sea>0.34-0.12*Math.max(0,0.55-lat)) return 'w';        // моря: у экватора чуть больше воды
+  const lake=fbmP(c+131,r*1.21+77,9,3);
+  if(lake>0.55&&lat<0.78) return 'w';   // озёр меньше (вердикт 05.10)                       // озёра: мелкие пятна 1-3 гекса
+  if(lat>0.93) return 'w';                                  // полярные воды-кромка
+  if(lat>0.82) return rough>0.3?'m':'n';
+  if(lat>0.74) return rough>0.37?'m':'t';                   // тундровая полоса (закон биомов 02.10)
+  if(lat>0.62) return rough>0.36?'m':'p';                    // тайга
+  if(lat>0.5){ if(rough>0.43)return 'm'; if(rough>0.24)return 'h';
+    return wet>0.18?'p':(wet>-0.25?'f':'g'); }
+  if(lat>0.3){ if(rough>0.47)return 'm'; if(rough>0.27)return 'h';
+    if(wet>0.14)return 'f'; if(wet>-0.18)return 'g'; return 'd'; }
+  if(lat>0.18){ if(rough>0.45)return 'h'; if(wet>0.3)return 'j';
+    if(wet>0.12)return 'f'; if(wet>-0.02)return 'g'; if(wet>-0.25)return 'sv'; if(wet>-0.42)return 'd'; return 's'; }
+  if(wet>0.3)return 'j'; if(wet>0.05)return 'sv'; if(wet>-0.25)return 'd'; return 's';
+}
+function postType(c,r,t){                                   // болота: низины у воды в тёплых поясах
+  if(t!=='g'&&t!=='f')return t;
+  const nearW=[[1,0],[-1,0],[0,1],[0,-1]].some(([dc,dr])=>cellType(((c+dc)%COLS+COLS)%COLS,Math.max(0,Math.min(ROWS-1,r+dr)))==='w');
+  if(nearW&&h2d(c*3+1,r*7+5)<0.3&&Math.abs(r-(ROWS-1)/2)/((ROWS-1)/2)<0.45)return 'mh';
+  return t; }
+const MAP=[];
+for(let r=0;r<ROWS;r++){ const row=[];
+  for(let c=0;c<COLS;c++) row.push(postType(c,r,cellType(c,r)));
+  MAP.push(row); }
+const hexDirs=r=>r%2?[[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,0]]:[[-1,-1],[0,-1],[1,0],[0,1],[-1,1],[-1,0]];
+const inPiece=(c,r)=>r>=PR0-2&&r<PR0+11&&c>=PC0-2&&c<PC0+11;
+{ // «ёлки в пустыне» (скрин 04.10): хвоя/лес в кольце сухих биомов → луг-переходник
+  const dryS=new Set(['d','s','sv']);
+  const fix=[]; let cnt=0;
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    const t=MAP[r][c]; if((t!=='p'&&t!=='f')||inPiece(c,r))continue;
+    let nd=0; for(const [dc,dr] of hexDirs(r)){ const rr2=r+dr;
+      if(rr2>=0&&rr2<ROWS&&dryS.has(MAP[rr2][((c+dc)%COLS+COLS)%COLS]))nd++; }
+    if(nd>=3){ fix.push([c,r]); cnt++; } }
+  for(const [c,r] of fix)MAP[r][c]='g';
+  window.__DRYFIX=cnt;
+}
+{ // горы пореже (вердикт 04.10 «многовато»): одинокие пики часто становятся холмами
+  const isM=(c,r)=>r>=0&&r<ROWS&&MAP[r][((c%COLS)+COLS)%COLS]==='m';
+  const demote=[];
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+    if(MAP[r][c]!=='m'||inPiece(c,r))continue;
+    let nm=0; for(const [dc,dr] of hexDirs(r))if(isM(c+dc,r+dr))nm++;
+    const u=h2d(c*13+5,r*17+9);
+    if((nm===0&&u<0.75)||(nm===1&&u<0.45)||(nm===2&&u<0.18))demote.push([c,r]); }
+  for(const [c,r] of demote)MAP[r][c]='h';
+}
+// деревни по карте: простая расстановка 04.10 («у воды, ≥8 клеток, случайный порядок») заменена 11.10 расстановкой
+// ПО ПРИГОДНОСТИ — блок «ДЕРЕВНИ ПО ПРИГОДНОСТИ» ниже, после рек (место оценивается с учётом русел)
+const KEY={m:'mountain',h:'hills',p:'pines',f:'forest',g:'meadow',d:'dry',v:'village',w:'water',
+  f2:'field',n:'snow',s:'desert',t:'tundra',mh:'marsh',j:'jungle',sv:'savanna'};
+const dxH=Math.sqrt(3)*HEXR, dzH=1.5*HEXR, rowsN=MAP.length;
+const CENTERS=[];
+MAP.forEach((cells,rI)=>cells.forEach((code,cI)=>{
+  const type=KEY[code]; if(!type)return;
+  CENTERS.push({x:(cI-(COLS-1)/2)*dxH+(rI%2?dxH/2:0), z:(rI-(rowsN-1)/2)*dzH, type, col:cI, row:rI});
+}));
+window.__VILW=CENTERS.filter(c=>c.type==='village').map(c=>[+c.x.toFixed(1),+c.z.toFixed(1)]);
+{ // островки: суша с ≥4 водными соседями из 6 — пометить (бугор в heightAt вместо плоской «наклейки»)
+  const wAt=(c,r)=>{ if(r<0||r>=ROWS)return true; return MAP[r][((c%COLS)+COLS)%COLS]==='w'; };
+  let nIsle=0;
+  for(const c of CENTERS){ if(c.type==='water')continue;
+    const nb=c.row%2?[[1,0],[-1,0],[0,-1],[1,-1],[0,1],[1,1]]:[[1,0],[-1,0],[-1,-1],[0,-1],[-1,1],[0,1]];
+    let wn=0; for(const [dc,dr] of nb) if(wAt(c.col+dc,c.row+dr))wn++;
+    if(wn>=4){c.isle=1;nIsle++;} }
+  window.__nIsle=nIsle; }
+// ручная трасса RIVER удалена 07.10 — все реки строятся из соединений водоёмов
+// ================= КОЛЬЦО ПО X =================
+const WX=COLS*dxH;                       // период мира (112 колонок)
+const WX0=-(COLS-1)/2*dxH-dxH/2;         // левый край периода
+const normX=x=>{ x=(x-WX0)%WX; if(x<0)x+=WX; return x+WX0; };
+const wdx=(a,b)=>{ let d=(a-b)%WX; if(d>WX/2)d-=WX; if(d<-WX/2)d+=WX; return d; };
+// решётка кандидатов: какие центры рядом с (x,z)
+const GRID=new Map(), CS=4;
+const gk=(i,j)=>i*1000+j;
+for(const c of CENTERS){
+  for(const xx of [c.x, c.x-WX, c.x+WX]){                 // клоны у шва: решётка видит центр с обеих сторон
+    if(Math.abs(xx-c.x)>0.1&&Math.abs(wdx(xx,WX0))>HEXR*4&&Math.abs(wdx(xx,WX0+WX))>HEXR*4)continue;
+    for(let i=Math.floor((xx-HEXR-1)/CS);i<=Math.floor((xx+HEXR+1)/CS);i++)
+      for(let j=Math.floor((c.z-HEXR-1)/CS);j<=Math.floor((c.z+HEXR+1)/CS);j++){
+        const k=gk(i,j); if(!GRID.has(k))GRID.set(k,[]); GRID.get(k).push({...c,x:xx});} }
+}
+// ворп границ: гекс-контуры биомов рвём шумом до ~±2.8 м (~половина грани гекса) — иначе озеро
+// в 1-2 гекса читается «ромбом из майнкрафта»: ±1.2 м было косметикой при грани 3.2 м.
+// ОДНА функция на краску/рельеф/декор: границы везде совпадают.
+// У деревни с полями ворп глушится до 30%: сетка полей должна оставаться ровной.
+const PBX0=(PC0-(COLS-1)/2-1.2)*dxH, PBX1=(PC0+9.2-(COLS-1)/2)*dxH,
+      PBZ0=(PR0-(rowsN-1)/2-1.2)*dzH, PBZ1=(PR0+9.2-(rowsN-1)/2)*dzH;
+function warpB(x,z){
+  let k=1;
+  if(x>PBX0-9&&x<PBX1+9&&z>PBZ0-9&&z<PBZ1+9){
+    const d=Math.max(Math.max(PBX0-x,0,x-PBX1),Math.max(PBZ0-z,0,z-PBZ1));
+    k=0.3+0.7*Math.min(1,d/9); }
+  const wx=(Math.sin(x*0.9+z*0.7)*0.5+Math.sin(x*0.37-z*0.29+2)*0.35
+           +Math.sin(x*0.57+z*0.44+1.3)*Math.cos(z*0.26-x*0.12+0.7)*0.65)*1.9;
+  const wz=(Math.sin(x*0.63-z*0.84+1)*0.5+Math.sin(x*0.22+z*0.41+4)*0.35
+           +Math.sin(z*0.52-x*0.39+3.0)*Math.cos(x*0.24+z*0.11+2.1)*0.65)*1.9;
+  return [x+wx*k,z+wz*k]; }
+function nearTile(x,z){ // свой гекс = ближайший центр (свойство гекс-решётки)
+  x=normX(x);
+  const w=warpB(x,z); x=normX(w[0]); z=w[1];
+  const cell=GRID.get(gk(Math.floor(x/CS),Math.floor(z/CS))); if(!cell)return null;
+  let best=null,bd=1e9;
+  for(const c of cell){const d=(c.x-x)**2+(c.z-z)**2; if(d<bd){bd=d;best=c;}}
+  return best;
+}
+// рамка карты и обрыв за ней
+let MINX=1e9,MAXX=-1e9,MINZ=1e9,MAXZ=-1e9;
+for(const c of CENTERS){MINX=Math.min(MINX,c.x);MAXX=Math.max(MAXX,c.x);
+  MINZ=Math.min(MINZ,c.z);MAXZ=Math.max(MAXZ,c.z);}
+MINX-=HEXR;MAXX+=HEXR;MINZ-=HEXR*1.05;MAXZ+=HEXR*1.05;
+function distOutside(x,z){
+  return Math.max(MINZ-z,0,z-MAXZ);}   // кольцо: края есть только на севере/юге
+const sstep=(a,b,t)=>{t=Math.min(1,Math.max(0,(t-a)/(b-a)));return t*t*(3-2*t);};
+// хребты: сколько горных соседей у горного гекса — цепь выше одиночной сопки («Альпы» 02.10)
+const MB=new Map();
+for(const c of CENTERS){ if(c.type!=='mountain')continue;
+  const near=new Set();
+  for(let i=-2;i<=2;i++)for(let j=-2;j<=2;j++){
+    const l=GRID.get(gk(Math.floor(c.x/CS)+i,Math.floor(c.z/CS)+j)); if(!l)continue;
+    for(const o of l){ if(o.type!=='mountain'||(o.col===c.col&&o.row===c.row))continue;
+      if(Math.hypot(wdx(o.x,c.x),o.z-c.z)<dxH*1.2)near.add(o.col+','+o.row); } }
+  MB.set(c.col+','+c.row,Math.min(2.4,near.size*0.8)); }
+// высота: мягкая волна + бонус типа тайла (взвешенно) + плоские площадки + обрыв края
+// Шум БЕЗ направления (value-noise на хэше), периодический по кольцу X: направленные
+// синусы на большой карте давали гребни и пики «по линейке» (урок-зебра 01.10).
+function vnp(u,v,K){ // по u период K узлов (кольцо), по v — без периода; 0..1
+  let xi=Math.floor(u); const zi=Math.floor(v), xf=u-xi, zf=v-zi;
+  xi=((xi%K)+K)%K; const x2=(xi+1)%K;
+  const su=xf*xf*(3-2*xf), sv=zf*zf*(3-2*zf);
+  const a=h2d(xi,zi), b=h2d(x2,zi), c=h2d(xi,zi+1), d=h2d(x2,zi+1);
+  return (a*(1-su)+b*su)*(1-sv)+(c*(1-su)+d*su)*sv; }
+function fbmR(x,z,f,oct){ // f = узлов на период мира; октавы вдвое мельче
+  let a=0.5,sm=0,n=0;
+  for(let o=0;o<oct;o++){ const K=Math.max(4,Math.round(f*Math.pow(2,o)));
+    sm+=a*vnp((x-WX0)/WX*K, z*K/WX+o*13.7, K); n+=a; a*=0.5; }
+  return sm/n; }
+function baseWave(x,z){return (fbmR(x,z,13,3)-0.5)*1.9;}
+const HLV=(()=>{ try{ return new URLSearchParams(location.search).get('hl')??'13'; }catch(e){ return '13'; } })();   // 16.10: пробы вида холмов (кадры Артёму)
+const HB={
+  mountain:(x,z)=>{ // Civ6-подход: гора = ОБЪЕКТ-меш (блок MNT ниже); рельеф — лишь скальный постамент
+    const nt=nearTile(x,z);
+    const mb=nt?(MB.get(nt.col+','+nt.row)||0):0;      // в цепи постамент чуть выше
+    return 1.15+0.3*mb+0.55*(fbmR(x+3,z+7,36,2)-0.5); },
+  hills:(x,z)=>1.05+1.1*(fbmR(x+3,z,34,3)-0.5)+0.5*(fbmR(x,z+5,70,2)-0.5)+(HLV.includes('1')?1.5*Math.max(0,fbmR(x+7,z+2,230,2)-0.36):0),   // 16.10 ?hl=1: бугры в полклетки
+  water:()=>-1.35, village:()=>0.06, field:()=>0.05,
+  // макро-рельеф суши: холмы с читаемыми тенями
+  meadow:(x,z)=>0.88*(fbmR(x+1,z+1,22,3)-0.5),
+  dry:(x,z)=>0.02+0.84*(fbmR(x+2,z+9,26,3)-0.5),
+  forest:(x,z)=>0.12+0.88*(fbmR(x+4,z+2,24,3)-0.5),
+  pines:(x,z)=>0.2+0.8*(fbmR(x+6,z+8,26,3)-0.5),
+  snow:(x,z)=>0.5+0.6*(fbmR(x+8,z+4,40,3)-0.5),
+  desert:(x,z)=>0.2+1.1*(fbmR(x+5,z+6,30,3)-0.5)+0.22*(fbmR(x+9,z+1,80,2)-0.5), // барханы
+  tundra:(x,z)=>0.3+0.14*Math.sin(x*1.4+z*1.1)+0.07*Math.sin(x*2.6-z*1.9),        // кочки (мелкие — рядность не читается)
+  marsh:(x,z)=>-0.04-0.5*Math.max(0,Math.sin(x*1.15+0.4)*Math.sin(z*0.95)-0.05),  // луж больше
+  jungle:()=>0.16, savanna:(x,z)=>0.08+0.2*(fbmR(x+12,z+3,30,2)-0.5),
+};
+function wiggle(pts,step,amp,seed){ // ломаная → извилистая: подразбить шагом step, снести перпендикуляром шумом
+  const out=[];
+  for(let i=0;i<pts.length-1;i++){ const a=pts[i],b=pts[i+1];
+    const L=Math.hypot(b[0]-a[0],b[1]-a[1])||1e-6, n=Math.max(1,Math.round(L/step));
+    const px2=-(b[1]-a[1])/L, pz2=(b[0]-a[0])/L;
+    for(let k=0;k<n;k++){ const t=k/n, x=a[0]+(b[0]-a[0])*t, z=a[1]+(b[1]-a[1])*t;
+      const fade=Math.min(1,4*t*(1-t));               // концы сегмента не сносим — стыки сходятся
+      const w=Math.sin(x*1.3+z*0.9+seed)*0.6+Math.sin(x*0.55-z*0.7+seed*2.1)*0.4;
+      out.push([x+px2*w*amp*fade, z+pz2*w*amp*fade]); } }
+  out.push(pts[pts.length-1]); return out; }
+function chaikin(pts,k){ for(;k>0;k--){ const o=[pts[0]];
+  for(let i=0;i<pts.length-1;i++){ const a=pts[i],b=pts[i+1];
+    o.push([a[0]*0.75+b[0]*0.25,a[1]*0.75+b[1]*0.25],[a[0]*0.25+b[0]*0.75,a[1]*0.25+b[1]*0.75]); }
+  o.push(pts[pts.length-1]); pts=o; } return pts; }
+// крупные водоёмы: кластеры воды ≥12 гексов (реки целятся в них, не в ближайшую лужу)
+const BIGW=(()=>{ const seenW=new Set(), out=[];
+  const at=(c2,r2)=>{ c2=((c2%COLS)+COLS)%COLS; if(r2<0||r2>=ROWS)return null; return MAP[r2][c2]; };
+  for(let r2=0;r2<ROWS;r2++)for(let c2=0;c2<COLS;c2++){
+    if(at(c2,r2)!=='w'||seenW.has(c2+','+r2))continue;
+    const comp=[],q=[[c2,r2]]; seenW.add(c2+','+r2);
+    while(q.length){ const [cc,rr2]=q.pop(); comp.push([cc,rr2]);
+      for(const [dc,dr] of [[1,0],[-1,0],[0,1],[0,-1],[rr2%2?1:-1,1],[rr2%2?1:-1,-1]]){
+        const nc=((cc+dc)%COLS+COLS)%COLS, nr=rr2+dr;
+        if(at(nc,nr)==='w'&&!seenW.has(nc+','+nr)){seenW.add(nc+','+nr);q.push([nc,nr]);} } }
+    if(comp.length>=12)for(const [cc,rr2] of comp)out.push(cc+','+rr2); }
+  return new Set(out); })();
+const WTARGETS=CENTERS.filter(c=>c.type==='water'&&BIGW.has(c.col+','+c.row));
+// несколько рек: исходная у деревни (сдвинута вместе с куском) + от горных узлов к морю
+const vHex=CENTERS.find(c=>c.type==='village'&&c.col>=PC0&&c.col<PC0+9&&c.row>=PR0&&c.row<PR0+9)||CENTERS.find(c=>c.type==='village'); // стартовая — ИЗ КУСКА: река и тракты привязаны к ней, не к новым 30 деревням
+// старая ручная RIVER0 убрана (вердикт 07.10 «замени все на новые»): все реки — соединения водоёмов
+const RIVERS_RAW=[], RIV_ENDS=[];   // RIV_ENDS[i]=[клеток в водоёме-истоке, клеток в водоёме-устье] — класс реки для виртуальной глубины
+{ // РЕКИ = ОСМЫСЛЕННЫЕ СОЕДИНЕНИЯ ВОДОЁМОВ (предложение Артёма 05.10): озеро↔озеро/море,
+  // в обход деревень; случайные обрывки «из горы в никуда» убраны как класс
+  const cenMap=new Map(CENTERS.map(c=>[c.col+','+c.row,c]));
+  const wseen=new Set(), pools=[];
+  for(const c of CENTERS){ if(c.type!=='water')continue;
+    const k0=c.col+','+c.row; if(wseen.has(k0))continue;
+    const cl=[c]; wseen.add(k0);
+    for(let i=0;i<cl.length;i++)for(const [dc,dr] of hexDirs(cl[i].row)){
+      const nc=((cl[i].col+dc)%COLS+COLS)%COLS, nr=cl[i].row+dr, nk=nc+','+nr;
+      if(nr<0||nr>=ROWS||wseen.has(nk))continue;
+      const cc=cenMap.get(nk);
+      if(cc&&cc.type==='water'){ wseen.add(nk); cl.push(cc); } }
+    if(cl.length>=3)pools.push(cl); }
+  const info=pools.map(cl=>{ const x0=cl[0].x; let sx=0,sz=0;
+    for(const c of cl){ sx+=x0+wdx(c.x,x0); sz+=c.z; }
+    return {cx:sx/cl.length, cz:sz/cl.length, n:cl.length, cells:cl}; });
+  const links=[];
+  for(let i=0;i<info.length;i++){
+    const cand2=[];
+    for(let j=0;j<info.length;j++){ if(j===i)continue;
+      const d=Math.hypot(wdx(info[j].cx,info[i].cx),info[j].cz-info[i].cz);
+      if(d>20&&d<170)cand2.push([d,j]); }
+    cand2.sort((a,b)=>a[0]-b[0]);
+    for(const [d,j] of cand2.slice(0, info[i].n>=12?2:1)){
+      const a=Math.min(i,j),b=Math.max(i,j), id=a*10000+b;
+      if(links.some(L2=>L2.id===id))continue;
+      links.push({id,a:i,b:j}); } }
+  const vilPts=CENTERS.filter(c=>c.type==='village'||c.type==='field');
+  for(const L of links){
+    const A=info[L.a], B=info[L.b];
+    let sc=A.cells[0], sd=1e9;
+    for(const c of A.cells){ const d=Math.hypot(wdx(B.cx,c.x),B.cz-c.z); if(d<sd){sd=d;sc=c;} }
+    let px=sc.x,pz=sc.z; const pts=[[px,pz]]; let ok=false;
+    for(let st=0;st<90;st++){
+      let done=false;
+      for(const c of B.cells){ if(Math.hypot(wdx(c.x,px),c.z-pz)<HEXR*1.1){
+        pts.push([px+wdx(c.x,px),pz+(c.z-pz)]); done=true; break; } }
+      if(done){ ok=true; break; }
+      const dB=Math.hypot(wdx(B.cx,px),B.cz-pz)||1e-6;
+      let ux=wdx(B.cx,px)/dB, uz=(B.cz-pz)/dB;
+      const e=2.5;
+      let gx=flatGrad(px+e,pz)-flatGrad(px-e,pz), gz=flatGrad(px,pz+e)-flatGrad(px,pz-e);
+      const gl=Math.hypot(gx,gz)||1e-6; gx/=-gl; gz/=-gl;
+      ux=ux*0.55+gx*0.6; uz=uz*0.55+gz*0.6;   // 08.10: обход возвышений умеренный (0.85 не доводил трассы до цели: рек 78→54)
+      for(const v of vilPts){ const dvx=wdx(px,v.x), dvz=pz-v.z, dv=Math.hypot(dvx,dvz)||1e-6;
+        if(dv<HEXR*2.2){ const w=(HEXR*2.2-dv)/(HEXR*2.2); ux+=dvx/dv*w*1.6; uz+=dvz/dv*w*1.6; } } // деревню обходим
+      const ul=Math.hypot(ux,uz)||1e-6; ux/=ul; uz/=ul;
+      const sway=Math.sin(st*1.3+L.id%17)*0.9;    // виляет сильнее (07.10: короткие протоки шли прямыми «каналами»)
+      px+=(ux*Math.cos(sway)-uz*Math.sin(sway))*6; pz+=(ux*Math.sin(sway)+uz*Math.cos(sway))*6;
+      pts.push([px,pz]); }
+    if(ok&&pts.length>4){
+      // 08.10: река обязана быть ПОЛНОЙ. Прикидка профиля дна по трассе: если где-то даже при
+      // врезе 2.4 дно остаётся выше глади (гряда) — эту связь не закладываем вообще (ни мели, ни каньона)
+      let lvS=Infinity, dryN=0;
+      for(const p of pts){ const h0=heightAt(p[0],p[1],true);
+        lvS=Math.min(lvS,h0-0.10,-0.72);   // та же формула, что в профиле lv ниже
+        if(Math.max(lvS,h0-2.4)>-0.68)dryN++; }
+      if(dryN>0)continue;
+      let chg=true;
+      while(chg){ chg=false;
+        for(let i2=1;i2<pts.length-1;i2++){
+          const ax=pts[i2][0]-pts[i2-1][0],az=pts[i2][1]-pts[i2-1][1];
+          const bx2=pts[i2+1][0]-pts[i2][0],bz2=pts[i2+1][1]-pts[i2][1];
+          const dot=(ax*bx2+az*bz2)/((Math.hypot(ax,az)||1e-9)*(Math.hypot(bx2,bz2)||1e-9));
+          if(dot<0.25){ pts.splice(i2,1); chg=true; break; } } }
+      RIVERS_RAW.push(pts); RIV_ENDS.push([A.n,B.n]); } }
+}
+const RIVLIST=RIVERS_RAW.map((raw,ri)=>({pts:chaikin(wiggle(raw.map(p=>[p[0],p[1]]),3.1,0.55,1+ri*3.7),1)}));
+for(const RL of RIVLIST)for(const p of RL.pts){            // финальный отступ от деревень (wiggle съедал ранний)
+  const dvx=wdx(p[0],vHex.x), dvz=p[1]-vHex.z, dv=Math.hypot(dvx,dvz);
+  if(dv<HEXR*1.8&&dv>1e-6){ const k=(HEXR*1.8-dv)/dv; p[0]+=dvx*k; p[1]+=dvz*k; } }
+window.__nriv=RIVLIST.length;
+// решётка сегментов всех рек: [ax,az,bx,bz, river,segIdx]; у шва сегмент кладётся с обеих сторон
+const RSEG=new Map(), RCS2=10, rk2=(i,j)=>i*100000+j;
+for(let ri=0;ri<RIVLIST.length;ri++){ const P=RIVLIST[ri].pts;
+  for(let i=0;i<P.length-1;i++){ const a=P[i],b=P[i+1];
+    for(const off of [0,-WX,WX]){
+      const ax=a[0]+off,bx=b[0]+off;
+      if(Math.max(ax,bx)<WX0-2||Math.min(ax,bx)>WX0+WX+2)continue;
+      for(let gx=Math.floor((Math.min(ax,bx)-2)/RCS2);gx<=Math.floor((Math.max(ax,bx)+2)/RCS2);gx++)
+        for(let gz=Math.floor((Math.min(a[1],b[1])-2)/RCS2);gz<=Math.floor((Math.max(a[1],b[1])+2)/RCS2);gz++){
+          const k=rk2(gx,gz); if(!RSEG.has(k))RSEG.set(k,[]); RSEG.get(k).push([ax,a[1],bx,b[1],ri,i]); } } } }
+function nearSeg(x,z){ x=normX(x);
+  let d=1e9,ri=-1,si=0,bt=0;
+  const gx=Math.floor(x/RCS2),gz=Math.floor(z/RCS2);
+  for(let i=-1;i<=1;i++)for(let j=-1;j<=1;j++){
+    const l=RSEG.get(rk2(gx+i,gz+j)); if(!l)continue;
+    for(const g of l){ const vx=g[2]-g[0],vz=g[3]-g[1],L2=vx*vx+vz*vz||1e-9;
+      let t=((x-g[0])*vx+(z-g[1])*vz)/L2; t=Math.min(1,Math.max(0,t));
+      const dd=Math.hypot(x-(g[0]+vx*t),z-(g[1]+vz*t));
+      if(dd<d){d=dd;ri=g[4];si=g[5];bt=t;} } }
+  return [d,ri,si,bt]; }
+function riverD(x,z){ return nearSeg(x,z)[0]; }
+function riverT(x,z){ return 1-sstep(0.25,1.7,riverD(x,z)); }   // 1 в осевой, 0 за берегом
+// ===== ДЕРЕВНИ ПО ПРИГОДНОСТИ (11.10) — перенос STARTS_RAW старого движка (index.html 2928–2975) =====
+// Место получает очки, лучшие садятся первыми. Очки (решения Артёма 21–23.08 и 11.10, сверка с историей расселения):
+// река вплотную +1.4, в 2 клетках +0.7 (правка 11.10: раньше обе +1.4, и берег озера в стороне обыгрывал берег самой реки),
+// слияние/излучина +0.8, берег озера +1.2, впадение/исток реки у озера +0.6, устье реки у моря +0.6 (голый морской берег 0),
+// мыс/бухта +0.5, холм +1.6, лес по соседству +0.4, плодородие до +1.4. Запрет: вода, русло, гора, болото, тундра,
+// снега, лес/хвойный/джунгли, островок, круча. Минимум между деревнями 3.75 шага гекса (13 ед. старого мира).
+{
+  const cm=new Map(CENTERS.map(c=>[c.col+','+c.row,c]));
+  const nbs=c=>{ const o=[]; for(const [dc,dr] of hexDirs(c.row)){ const r=c.row+dr; if(r<0||r>=ROWS)continue;
+    const n=cm.get((((c.col+dc)%COLS+COLS)%COLS)+','+r); if(n)o.push(n); } return o; };
+  for(const c of CENTERS){ if(c.type!=='water'||c._wn)continue;        // _wn — клеток в водоёме: меньше 12 — озеро, иначе море
+    const cl=[c]; c._wn=-1;
+    for(let i=0;i<cl.length;i++)for(const n of nbs(cl[i])) if(n.type==='water'&&!n._wn){ n._wn=-1; cl.push(n); }
+    for(const k of cl)k._wn=cl.length; }
+  const rivHex=new Set();                                             // клетка русла: осевая проходит через гекс
+  if(RV>0)for(const c of CENTERS) if(c.type!=='water'&&riverD(c.x,c.z)<HEXR*0.81)rivHex.add(c);
+  const mouths=[], lmouths=[];                                        // устья: конец реки в большой воде; lmouths — конец реки в озере
+  RIVLIST.forEach((R,i)=>{ const e=RIV_ENDS[i]||[0,0];
+    (e[0]>=12?mouths:lmouths).push(R.pts[0]); (e[1]>=12?mouths:lmouths).push(R.pts[R.pts.length-1]); });
+  const hOf=c=>c._h0??(c._h0=Math.max(heightAt(c.x,c.z,true),-0.62));  // ниже уреза режем по урезу, как hexSlope старого
+  const slopeOf=c=>{ let mx=0; for(const n of nbs(c)){ const d=Math.abs(hOf(n)-hOf(c)); if(d>mx)mx=d; } return mx; };
+  const K=HEXR/2.0;                                                   // масштаб к старому миру (там радиус гекса 2.0)
+  const OKT=new Set(['meadow','dry','hills','desert','savanna']), WOOD=new Set(['forest','pines','jungle']);
+  const FERT={meadow:1,dry:0.8,savanna:0.8,hills:0.75,desert:0};      // карты влажности в новом мире нет — плодородие по типу клетки
+  const cand=[], allSl=[];
+  for(const c of CENTERS){ if(c.type==='water'||rivHex.has(c))continue; allSl.push(slopeOf(c)); }
+  allSl.sort((a,b)=>a-b);
+  const CLIFF=Math.max(1.6*K,allSl[allSl.length>>1]*1.6);
+  for(const c of CENTERS){
+    if(!OKT.has(c.type)||c.isle||rivHex.has(c)||c.row<6||c.row>=ROWS-6||inPiece(c.col,c.row))continue;
+    const nb=nbs(c), wn=nb.filter(n=>rivHex.has(n)).length;
+    const wn2=wn>0||nb.some(n=>nbs(n).some(m=>rivHex.has(m)));
+    const lakeN=nb.filter(n=>n.type==='water'&&n._wn<12).length, seaN=nb.filter(n=>n.type==='water'&&n._wn>=12).length;
+    const mouth=seaN>0&&mouths.some(m=>Math.hypot(wdx(m[0],c.x),m[1]-c.z)<=2*dxH+0.5);
+    const lmouth=lakeN>0&&wn>0&&lmouths.some(m=>Math.hypot(wdx(m[0],c.x),m[1]-c.z)<=2*dxH+0.5);   // у самого впадения: и озеро, и русло вплотную
+    const f=Math.min(1,(FERT[c.type]||0)+(c.type!=='desert'&&wn>0?0.22:0));
+    let bon=0;
+    if(wn>0)bon+=1.4; else if(wn2)bon+=0.7; if(wn>=2)bon+=0.8; if(lakeN>0)bon+=1.2; if(lmouth)bon+=0.6; if(mouth)bon+=0.6; if(lakeN+seaN>=3)bon+=0.5;
+    if(c.type==='hills')bon+=1.6; if(nb.some(n=>WOOD.has(n.type)))bon+=0.4; bon+=1.4*f;
+    cand.push({c,bon,sl:slopeOf(c),nearW:lakeN+seaN>0||wn2,part:{wn,wn2,lakeN,seaN,mouth,lmouth,wood:nb.some(n=>WOOD.has(n.type)),f},tag:{river:wn2,rivAdj:wn>0,confl:wn>=2,lake:lakeN>0,lmouth,mouth,sea:seaN>0,hill:c.type==='hills'}}); }
+  const sl2=cand.map(k=>k.sl).sort((a,b)=>a-b), thr=sl2[Math.floor(sl2.length*0.40)]||0;
+  let pool=cand.filter(k=>(k.sl<=thr||k.nearW)&&k.sl<=CLIFF);
+  if(pool.length<12)pool=cand.filter(k=>k.sl<=CLIFF);
+  if(pool.length<12)pool=cand;
+  for(const k of pool)k.score=k.bon*10-k.sl*(6/K);
+  pool.sort((a,b)=>b.score-a.score||h2d(a.c.col*31+7,a.c.row*37+3)-h2d(b.c.col*31+7,b.c.row*37+3));
+  const taken=CENTERS.filter(c=>c.type==='village'), MIND=3.75*dxH, picked=[];
+  // всего деревень на карте (вместе с нарисованными вручную): старый движок ставил 10·size², на этой карте (size=2) — 40;
+  // умолчание 60 — решение Артёма 11.10 («как минимум 60, дальше буду смотреть»); ?vil=N — проба числа
+  const VILN=Math.max(1,Math.min(400,Math.round(+(Q0.get('vil')||60))||60)), VILQ=VILN-taken.length;
+  pool.forEach((k,i)=>{ k.rank=i+1; k.inPool=true; });
+  for(const k of pool){ if(picked.length>=VILQ){ k.why='до неё очередь не дошла: набрано '+VILN; continue; }
+    if(h2d(k.c.col*31+7,k.c.row*37+3)>=0.85){ k.why='лотерея (15% мест пропускаются)'; continue; }   // лотерея 0.85, как в старом — не все лучшие места заняты
+    const bl=taken.find(t=>Math.hypot(wdx(t.x,k.c.x),t.z-k.c.z)<MIND);
+    if(bl){ k.why='ближе 3.75 клетки к деревне '+bl.col+','+bl.row+', выбранной раньше'; continue; }
+    taken.push(k.c); picked.push(k); k.why='ВЫБРАНА №'+picked.length; }
+  { // отладочный разбор (11.10): __vilWhy(col,row,радиус в клетках) — очки клетки и соседних, почему выбрана/не выбрана
+    const cmap=new Map(cand.map(k=>[k.c.col+','+k.c.row,k]));
+    window.__vilWhy=(col,row,rad=2)=>{ const o=cm.get(col+','+row); if(!o)return null;
+      return CENTERS.filter(c=>Math.hypot(wdx(c.x,o.x),c.z-o.z)<=(rad+0.2)*dxH).map(c=>{
+        const k=cmap.get(c.col+','+c.row), dist=+(Math.hypot(wdx(c.x,o.x),c.z-o.z)/dxH).toFixed(1);
+        if(!k)return {кл:c.col+','+c.row,до:dist,тип:c.type,итог:c.type==='water'?'вода':rivHex.has(c)?'русло реки':c.isle?'островок':'тип не для деревни'};
+        const p=k.part, parts=[];
+        if(p.wn>0)parts.push('река вплотную +1.4'); else if(p.wn2)parts.push('река в 2 клетках +0.7'); if(p.wn>=2)parts.push('река с 2 сторон +0.8'); if(p.lakeN>0)parts.push('озеро +1.2');
+        if(p.lmouth)parts.push('впадение в озеро +0.6'); if(p.mouth)parts.push('устье у моря +0.6'); if(p.lakeN+p.seaN>=3)parts.push('вода с 3 сторон +0.5');
+        if(k.c===c&&k.tag.hill)parts.push('холм +1.6'); if(p.wood)parts.push('лес рядом +0.4'); parts.push('почва +'+(1.4*p.f).toFixed(2));
+        return {кл:c.col+','+c.row,до:dist,тип:k.tag.hill?'hills':(c.type==='village'?'(деревня)':c.type),рекСоседей:p.wn,очки:+k.bon.toFixed(2),
+          склон:+k.sl.toFixed(2),балл:k.inPool?+k.score.toFixed(1):null,место:k.rank||null,слагаемые:parts.join('; '),
+          итог:k.inPool?k.why:'отсеяна по крутизне (склон '+k.sl.toFixed(2)+', порог '+thr.toFixed(2)+', обрыв '+CLIFF.toFixed(2)+')'}; })
+        .sort((a,b)=>(b.балл??-1)-(a.балл??-1)); }; }
+  const keys=new Set(picked.map(k=>k.c.col+','+k.c.row));
+  for(const k of picked){ k.c.was=k.c.type; k.c.type='village'; k.c._h0=undefined; MAP[k.c.row][k.c.col]='v'; }   // was — местность до деревни (строка «Местность» во всплывашке)
+  for(const l of GRID.values())for(const o of l) if(keys.has(o.col+','+o.row))o.type='village';   // в решётке лежат КОПИИ центров
+  window.__VIL=picked.map(k=>[k.c.col,k.c.row]);
+  window.__VILW=CENTERS.filter(c=>c.type==='village').map(c=>[+c.x.toFixed(1),+c.z.toFixed(1)]);
+  { const cnt={river:0,rivAdj:0,confl:0,lake:0,lmouth:0,mouth:0,sea:0,hill:0}; for(const k of picked)for(const t in cnt)if(k.tag[t])cnt[t]++;
+    const nn=picked.map(k=>Math.min(...taken.filter(t=>t!==k.c).map(t=>Math.hypot(wdx(t.x,k.c.x),t.z-k.c.z)))/dxH).sort((a,b)=>a-b);
+    window.__vilStat={всего:taken.length,заказано:VILN,деревень:picked.length,кандидатов:cand.length,в_отборе:pool.length,признаки:cnt,
+      очки_мин_макс:[+Math.min(...picked.map(k=>k.bon)).toFixed(1),+Math.max(...picked.map(k=>k.bon)).toFixed(1)],
+      до_соседа_клеток_мин_мед_макс:[+nn[0].toFixed(1),+nn[nn.length>>1].toFixed(1),+nn[nn.length-1].toFixed(1)],
+      типы:picked.reduce((o,k)=>(o[k.tag.hill?'холм':'равнина']=(o[k.tag.hill?'холм':'равнина']||0)+1,o),{}),
+      колонки:picked.map(k=>k.c.col).sort((a,b)=>a-b).join(' ')}; }
+}
+function flatHeight(c){return baseWave(c.x,c.z)+HB[c.type](c.x,c.z);}
+function flatGrad(x,z){ const nt=nearTile(x,z); return nt?baseWave(x,z)+HB[nt.type](x,z):0; }
+function heightAt(x,z,noRiver){
+  x=normX(x);
+  const i=Math.floor(x/CS), j=Math.floor(z/CS);
+  const seen=new Set(); let sw=0,sb=0,swW=0,flat=0,fh=0,sw2=0,swW2=0,sbI=0; const hbc={};
+  for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){
+    const l=GRID.get(gk(i+a,j+b)); if(!l)continue;
+    for(const c of l){ if(seen.has(c))continue; seen.add(c);
+      const d=Math.hypot(c.x-x,c.z-z);
+      const w=Math.exp(-((d/(HEXR*0.75))**2));
+      sw+=w; sb+=w*(hbc[c.type]??(hbc[c.type]=HB[c.type](x,z))); if(c.isle)sbI+=w;
+      const w2m=Math.max(0,1-(d*d)/(HEXR*HEXR*3.2)), w2=w2m*w2m;  // ТО ЖЕ ядро, что поле воды в сплате
+      sw2+=w2; if(c.type==='water'){swW+=w;swW2+=w2;}
+      if(c.type==='village'||c.type==='field'){
+        const fw=1-sstep(HEXR*0.55,HEXR*1.05,d);
+        if(fw>flat){flat=fw;fh=flatHeight(c);} } } }
+  let h=baseWave(x,z)*(sw>0?1-0.85*(swW/sw):1)+(sw>0?sb/sw:0); // в открытой воде волну гасим: её пики торчали «островами»
+  if(flat>0)h=h*(1-flat)+fh*flat;
+  if(sbI>0)h+=0.5*(sbI/sw);   // 08.10: островки (≥4 соседей-вода) — пологий бугор вместо плоской «наклейки»
+  const nt=nearTile(x,z);
+  const wfr=sw2>0?swW2/sw2:0;                            // поле воды — ТО ЖЕ, что красит урез в сплате
+  if(nt&&nt.type!=='water'&&h<-0.1&&wfr<0.45)h=-0.1+(h+0.1)*0.25;  // суша не ныряет — но НЕ внутри поля воды (этот кламп делал уступы на мысах)
+  if(wfr>0.5&&h>-0.42)h+= (Math.min(-0.42,h)-h)*Math.min(1,(wfr-0.5)/0.12); // под маской воды рельеф тонет — уступам неоткуда взяться
+  const rt=noRiver?0:riverT(x,z);           // русло всегда ниже глади, куда бы ни шло
+  if(rt>0){ if(RV===1||RV===2)h=Math.max(-0.05,h-rt*0.3);               // rv1/2: лёгкая ложбина, вода краской
+    else if(RV===4){ const dl=riverDL(x,z);                             // rv4: дно по МОНОТОННОМУ профилю (вода только вниз)
+      if(dl[0]<0.78&&h>dl[1]){ const k=1-sstep(0.18,0.78,dl[0]);   // 08.10 «ещё тоньше»: окно вреза 0.25/1.1→0.18/0.78; врез узкий, рампа в ядре выключена (вор мелей)          // ПРОКОП 08.10: полка ±0.75 — шире полушага LOD1 0.9 (в каждом
+        const lvl=Math.max(dl[1],h-2.4);                                // сечении есть вершина с дном lv → мелей нет), а вода узкая:
+        h=h*(1-k)+lvl*k; } }                                            // полка 1.1 заливала русло вдвое шире прежнего (вердикт 08.10)
+    else if(RV>=3){ h-=rt*0.18;                                         // мягкая ложбина-долина
+      if(h<-0.26&&h>-0.9&&rt>0.08&&rt<0.7)h=-0.26;                      // «набережная»: берег не тонет → ширина русла постоянна (море не трогаем)
+      const k=Math.pow(rt,2.2); h=h*(1-k)+Math.min(h,-0.62)*k; }        // узкое глубокое ядро — вода не разливается
+    else h=h*(1-rt)+Math.min(h,-0.85)*rt; }
+  { // рампа у уреза (-1..0): наклон у воды ×0.2 — зуб сетки у кромки почти плоский, берег пологий.
+    // НО НЕ В РУСЛАХ (08.10): рампа поднимала дно −0.72 до −0.605 — ВЫШЕ глади −0.62, неглубокие
+    // русла сохли по всей карте («мели»), глубокие толстели — вес рампы гасится близостью реки
+    const tW=(h+0.5)/0.5;
+    if(tW>-1&&tW<1){ const q=1-tW*tW; h=-0.5+(h+0.5)*(1-0.8*q*q*(1-sstep(0.6,0.85,rt))); } }   // рампа выключена ТОЛЬКО в ядре русла (мели не возвращаются); на бортах работает и поджимает их над водой — без этого вода расползалась по бортам (замер сечений 08.10: ширина не менялась)
+  const d=distOutside(x,z);   // 08.10: вал-торосы убраны по скрину цивы — там просто срез карты, лёд = льдины на воде
+  if(d>0)h-=Math.min(3.4,d*d*1.5+d*1.2);   // обрыв круто, как цив-берег
+  return h;
+}
+// профиль дна rv4: уровень вдоль осевой МОЖЕТ ТОЛЬКО ПАДАТЬ (на каждую реку свой)
+for(const Rv of RIVLIST){ const a=[]; let lv=Infinity;
+  for(const p of Rv.pts){ const h0=heightAt(p[0],p[1],true);
+    lv=Math.min(lv,h0-0.10,-0.72); a.push(lv); }   // БЕЗ принудительного падения: 0.006×130 точек утаскивало дно к −1.5 (probe 08.10) — глубокая вода заливала склоны, реки толстели; монотонность держит min с предыдущим   // всегда ниже глади −0.62 (мели), но НЕГЛУБОКО: 0.012 уводило дно к −1.5 — вода заливала весь скат, реки толстели вдвое (вердикт 08.10)
+  Rv.lv=a; }
+{ // диагностика прокопа (08.10): доля точек осей с дном выше глади −0.62 (сухие мели);
+  // дно оси = max(lv, рельеф−2.4) — лимит вреза может поднять его над водой
+  let tot=0,dry=0;
+  for(const Rv of RIVLIST)for(let i=0;i<Rv.pts.length;i++){ tot++;
+    if(heightAt(Rv.pts[i][0],Rv.pts[i][1])>-0.62)dry++; }   // НАСТОЯЩИЙ рельеф оси (с врезом и рампой), не прикидка — прикидка пропустила рампу-вора
+  window.__rivDry={tot,dry,pct:Math.round(dry/Math.max(1,tot)*1000)/10};
+}
+function riverDL(x,z){  // [расстояние до осевой, уровень дна в ближайшей точке]
+  const [d,ri,si,bt]=nearSeg(x,z);
+  if(ri<0)return [1e9,-9];
+  const L=RIVLIST[ri].lv;
+  return [d, L[si]+(L[Math.min(si+1,L.length-1)]-L[si])*bt];
+}
+// ===== ВИРТУАЛЬНАЯ ГЛУБИНА (10.10, решение Артёма): дно НЕ копаем — подсказка и будущий расчёт брода берут глубину ОТСЮДА =====
+// Реки: класс по водоёмам на концах (малый — меньше 12 клеток): два малых → ручей 0.4–1.2 м, малый+большой → средняя
+// 1.5–4 м, два больших → крупная 4–9 м; вдоль русла гуляет плёсами и перекатами. Вода: по удалённости клетки от
+// берега и размеру водоёма. ПРАВИЛО БРОДА: вброд только при глубине < FORD_MAX; глубже — паром или мост.
+const FORD_MAX=1.0, VD_SURF=-0.62;
+const HEXMAP=new Map(); for(const c of CENTERS)HEXMAP.set(c.col+','+c.row,c);
+function hexAt(x,z){ // ближайший центр: 3 ряда × 3 колонки, расстояние с обёрткой кольца
+  const rF=z/dzH+(rowsN-1)/2; let best=null,bd=1e9;
+  for(let r=Math.round(rF)-1;r<=Math.round(rF)+1;r++){ if(r<0||r>=ROWS)continue;
+    const cF=x/dxH+(COLS-1)/2-(r%2?0.5:0);
+    for(let ci=Math.round(cF)-1;ci<=Math.round(cF)+1;ci++){
+      const c=HEXMAP.get((((ci%COLS)+COLS)%COLS)+','+r); if(!c)continue;
+      const dd=Math.hypot(wdx(x,c.x),z-c.z); if(dd<bd){bd=dd;best=c;} } }
+  return bd<=HEXR*1.05?best:null;
+}
+const VD=(()=>{
+  const nbs=c=>{ const o=[]; for(const [dc,dr] of hexDirs(c.row)){ const r=c.row+dr; if(r<0||r>=ROWS)continue;
+    const n=HEXMAP.get((((c.col+dc)%COLS+COLS)%COLS)+','+r); if(n)o.push(n); } return o; };
+  for(const c of CENTERS){ if(c.type!=='water'||c._wn)continue;        // _wn — клеток в водоёме
+    const cl=[c]; c._wn=-1;
+    for(let i=0;i<cl.length;i++)for(const n of nbs(cl[i])) if(n.type==='water'&&!n._wn){ n._wn=-1; cl.push(n); }
+    for(const k of cl)k._wn=cl.length; }
+  let fr=[];                                                          // _wd — удалённость от берега в клетках (1 = касается суши)
+  for(const c of CENTERS){ if(c.type==='water'&&nbs(c).some(n=>n.type!=='water')){ c._wd=1; fr.push(c); } }
+  while(fr.length){ const nx=[]; for(const c of fr)for(const n of nbs(c)) if(n.type==='water'&&!n._wd){ n._wd=c._wd+1; nx.push(n); } fr=nx; }
+  const cellD=c=>{ if(c._vd)return c._vd;
+    const u=h2d(c.col*53+11,c.row*71+5), d=c._wd||9;
+    return c._vd = c._wn<12 ? (d<=1?1+2*u:4+4*u) : (d<=1?2+4*u : d===2?15+15*u : Math.min(200,60+(d-3)*35+25*u)); };
+  const rivInfo=ri=>{ const R=RIVLIST[ri]; if(R._vd)return R._vd;
+    const e=RIV_ENDS[ri]||[0,0], cls=(e[0]>=12?1:0)+(e[1]>=12?1:0), cum=[0];
+    for(let i=1;i<R.pts.length;i++)cum.push(cum[i-1]+Math.hypot(R.pts[i][0]-R.pts[i-1][0],R.pts[i][1]-R.pts[i-1][1]));
+    return R._vd={cls,lo:[0.4,1.5,4][cls],hi:[1.2,4,9][cls],cum,f1:h2d(ri*17+3,91)*6.2832,f2:h2d(ri*29+7,13)*6.2832}; };
+  function river(x,z){ const [d,ri,si,bt]=nearSeg(x,z); if(ri<0)return null;
+    const I=rivInfo(ri), s=I.cum[si]+(I.cum[Math.min(si+1,I.cum.length-1)]-I.cum[si])*bt;
+    const u=0.5+0.5*(0.65*Math.sin(s*6.2832/38+I.f1)+0.35*Math.sin(s*6.2832/17+I.f2));   // плёсы и перекаты
+    return {D:I.lo+(I.hi-I.lo)*u,cls:I.cls,dist:d}; }
+  // глубина в точке: {D — метры, kind:'river'|'water', cls — класс реки 0..2, lake/far — для подписи, ford} | null (сухо)
+  function at(x,z){ const c=hexAt(normX(x),z); if(!c)return null;
+    if(c.type!=='water'&&RV>0){ const r=river(x,z);
+      if(r&&r.dist<0.4+HEXR*0.45)return {D:r.D,kind:'river',cls:r.cls,ford:r.D<FORD_MAX}; }
+    const g=VD_SURF-heightAt(x,z); if(g<=0.06)return null;
+    const wc=c.type==='water', D=(wc?cellD(c):2.0)*Math.min(1,g/0.6);   // у уреза мелко: растёт от нуля к полной глубине клетки
+    return {D,kind:'water',lake:wc&&c._wn<12,far:wc&&c._wn>=12&&(c._wd||9)>=3,ford:D<FORD_MAX}; }
+  window.__vDepth=(x,z)=>at(x,z);
+  window.__vdStat=()=>{ const k=[0,0,0]; for(let i=0;i<RIVLIST.length;i++)k[rivInfo(i).cls]++;
+    const w={}; for(const c of CENTERS)if(c.type==='water'){ const key=(c._wn<12?'озеро':'большая')+' d'+Math.min(c._wd||9,4); w[key]=(w[key]||0)+1; }
+    return {реки_ручей_средняя_крупная:k,вода:w}; };
+  return {at,river};
+})();
+// ===== УКРАШЕНИЕ ДЕРЕВЕНЬ (14.10) — перенос villageDecorAll старого движка (index.html 7855–7892) =====
+// Как там: из 6 соседей деревни луг — пашня и загон, первая вода (озеро/море) — причал; клетки, через которые идёт русло,
+// пропускаются («река из огорода», 13.09). НОВОЕ: выпас и на степи/саванне (у старого там тоже был только выпас, BIOME_IND). Вид — НОВЫЙ, в стиле big.html (решение Артёма 14.10):
+// плетёный загон с овцами, пашня — борозды краской + снопы, мостки на сваях с долблёнкой.
+// Тип клетки НЕ меняется (по типу считается база рельефа) — только флаги pen/farm/dock, и в CENTERS, и в копиях GRID.
+{ let nP=0,nF=0,nD=0; const marks=new Map(), full=[];
+  for(const v of CENTERS){ if(v.type!=='village')continue;
+    const nb=hexDirs(v.row).map(([dc,dr])=>HEXMAP.get((((v.col+dc)%COLS+COLS)%COLS)+','+(v.row+dr))).filter(Boolean);
+    if(nb.some(n=>n.type==='field'))continue;                       // ручная деревня — своё поле уже есть
+    // русло через СЕРЕДИНУ клетки — не огород; река по краю клетки не мешает (у 46 из 60 деревень река рядом)
+    const free=n=>!n.pen&&!n.farm&&!(RV>0&&riverD(n.x,n.z)<HEXR*0.35);
+    // как BIOME_IND старого (index.html 6976): луг — пашня или выпас; степь (dry/savanna) — только выпас (соха целину не берёт)
+    const mead=nb.filter(n=>n.type==='meadow'&&free(n));
+    const graze=nb.filter(n=>(n.type==='dry'||n.type==='savanna')&&free(n));
+    const wat=nb.filter(n=>n.type==='water'&&!n.dock);
+    const farmC=mead[0], penC=mead.length>1?mead[1]:graze[0];         // пашня важнее: первый луг — под пашню, выпас — на втором лугу или в степи
+    if(penC){ penC.pen={vx:v.x,vz:v.z}; marks.set(penC.col+','+penC.row,penC); nP++; }
+    if(farmC){ farmC.farm=true; marks.set(farmC.col+','+farmC.row,farmC); nF++; }
+    if(wat[0]){ wat[0].dock={vx:v.x,vz:v.z}; marks.set(wat[0].col+','+wat[0].row,wat[0]); nD++; }
+    if(farmC&&penC&&wat[0])full.push([+v.x.toFixed(1),+v.z.toFixed(1),v.col,v.row]); }
+  for(const l of GRID.values())for(const o of l){ const m=marks.get(o.col+','+o.row);
+    if(m){ o.pen=m.pen; o.farm=m.farm; o.dock=m.dock; } }
+  window.__decoStat={загонов:nP,пашен:nF,причалов:nD,все_три:full.length}; window.__decoFull=full;
+  window.__typeXY=t=>CENTERS.filter(c=>c.type===t).map(c=>[+c.x.toFixed(1),+c.z.toFixed(1)]);
+  window.__decoXY=k=>CENTERS.filter(c=>c[k]).map(c=>[+c.x.toFixed(1),+c.z.toFixed(1)]); }   // мостик стенда: координаты пашен/загонов/причалов
+// ===== ТРОПЫ ДО ПЕРВОГО ХОДА (11.10) — перенос seedStarterRoads старого движка (index.html 5477–5720) =====
+// Связи — остовное дерево (Крускал), путь — Дейкстра по клеткам с ценами старого edgeW, 8 прогонов с прилипанием
+// к уже протоптанному. Вид — «дороги-грейды» полигона rr.html от 30.09 (вердикт Артёма «дороги понравились: вначале тропинки,
+// когда наезжено — тракт с колеями; не так прямо»): расстояние до тропы печётся в G-канал tSplat4, шейдер земли рисует тропинку/тракт.
+// Правила нового мира (решения Артёма 10–11.10): реку переходят только вброд, где виртуальная глубина < FORD_MAX;
+// глубже — стена. Джунгли дороже леса. Вода и гора непроходимы.
+const TRAILS=(()=>{
+  const K=HEXR/2.0, N=CENTERS.length, Qm=Q0.get('mst')||'cost';
+  const idx=new Map(CENTERS.map((c,i)=>[c.col+','+c.row,i]));
+  const COST={meadow:1,field:1,village:1,dry:1.3,savanna:1.3,tundra:1.8,desert:3.2,hills:4,snow:26,marsh:40,forest:55,pines:55,jungle:70};
+  const hC=new Float32Array(N), cc=new Float32Array(N);
+  CENTERS.forEach((c,i)=>{ cc[i]=COST[c.type]||0; hC[i]=cc[i]?Math.max(heightAt(c.x,c.z,true),-0.62):0; });
+  // --- переправа: пересекает ли отрезок между центрами клеток русло, и какая там глубина ---
+  const segT=(ax,az,bx,bz,cx,cz,dx,dz)=>{ const rX=bx-ax,rZ=bz-az,sX=dx-cx,sZ=dz-cz,den=rX*sZ-rZ*sX; if(Math.abs(den)<1e-9)return -1;
+    const t=((cx-ax)*sZ-(cz-az)*sX)/den,u=((cx-ax)*rZ-(cz-az)*rX)/den; return t>=0&&t<=1&&u>=0&&u<=1?t:-1; };
+  function crossings(a,b){ const out=[], seen=new Set(); if(!(RV>0))return out;
+    const ax0=normX(a.x), bx0=ax0+wdx(b.x,a.x);
+    for(const off of [0,-WX,WX]){ const ax=ax0+off,bx=bx0+off;
+      if(Math.max(ax,bx)<WX0-2||Math.min(ax,bx)>WX0+WX+2)continue;
+      for(let gx=Math.floor(Math.min(ax,bx)/RCS2);gx<=Math.floor(Math.max(ax,bx)/RCS2);gx++)
+        for(let gz=Math.floor(Math.min(a.z,b.z)/RCS2);gz<=Math.floor(Math.max(a.z,b.z)/RCS2);gz++){
+          const l=RSEG.get(rk2(gx,gz)); if(!l)continue;
+          for(const g of l){ const key=g[4]*100000+g[5]; if(seen.has(key))continue;
+            const t=segT(ax,a.z,bx,b.z,g[0],g[1],g[2],g[3]); if(t<0)continue; seen.add(key);
+            const px=ax+(bx-ax)*t, pz=a.z+(b.z-a.z)*t, r=VD.river(px,pz);
+            out.push({x:normX(px),z:pz,D:r?r.D:9,ri:g[4]}); } } }
+    return out; }
+  // --- граф: соседи по гекс-решётке (кольцо по X), цена ребра = средняя цена клеток + наклон×5 (как cost старого) ---
+  const eA=[],eB=[],eBase=[],eFord=[],adj=Array.from({length:N},()=>[]);
+  let nFordE=0,nWallE=0;
+  CENTERS.forEach((c,i)=>{ if(!cc[i])return;
+    for(const [dc,dr] of hexDirs(c.row)){ const r=c.row+dr; if(r<0||r>=ROWS)continue;
+      const j=idx.get((((c.col+dc)%COLS+COLS)%COLS)+','+r); if(j===undefined||j<=i||!cc[j])continue;
+      const o=CENTERS[j], cr=crossings(c,o); let ford=0;
+      if(cr.length){ if(cr.some(q=>q.D>=FORD_MAX)){ nWallE++; continue; }          // глубоко — стена
+        for(const q of cr)ford+=2+6*q.D/FORD_MAX; nFordE++; }                      // брод: 2 (мелко) … 8 (у предела), как riverCross старого
+      const sl=Math.abs(hC[i]-hC[j])/Math.hypot(wdx(c.x,o.x),c.z-o.z);
+      const e=eA.length; eA.push(i); eB.push(j); eBase.push((cc[i]+cc[j])*0.5+sl*5); eFord.push(ford);
+      adj[i].push([j,e]); adj[j].push([i,e]); } });
+  const NE=eA.length, roadUse=new Float32Array(NE), flow=new Float32Array(NE); let roadUseMax=1e-6;
+  const edgeW=(e,stick)=>{ const c=eBase[e]; let w=c+0.05;
+    if(stick&&roadUseMax>1e-6)w*=1-(c>6?0.15:0.55)*Math.min(1,roadUse[e]/roadUseMax);   // прилипание к готовой тропе
+    return w+eFord[e]; };
+  // --- Дейкстра с двоичной кучей (как в старом) ---
+  const dist=new Float64Array(N), prev=new Int32Array(N), prevE=new Int32Array(N), done=new Uint8Array(N);
+  function dijkstra(src,dst,stick){ dist.fill(Infinity); prev.fill(-1); done.fill(0); dist[src]=0;
+    const heap=[src], less=(a,b)=>dist[heap[a]]<dist[heap[b]], swap=(a,b)=>{ const t=heap[a]; heap[a]=heap[b]; heap[b]=t; };
+    const push=v=>{ heap.push(v); let i=heap.length-1; while(i>0){ const p=(i-1)>>1; if(less(i,p)){ swap(i,p); i=p; } else break; } };
+    const pop=()=>{ const top=heap[0], last=heap.pop();
+      if(heap.length){ heap[0]=last; let i=0; for(;;){ const l=2*i+1,r=l+1; let m=i;
+        if(l<heap.length&&less(l,m))m=l; if(r<heap.length&&less(r,m))m=r; if(m===i)break; swap(i,m); i=m; } }
+      return top; };
+    while(heap.length){ const u=pop(); if(done[u])continue; if(u===dst)break; done[u]=1;
+      for(const [o,e] of adj[u]){ if(done[o])continue; const nd=dist[u]+edgeW(e,stick);
+        if(nd<dist[o]){ dist[o]=nd; prev[o]=u; prevE[o]=e; push(o); } } }
+    if(dst<0)return null; if(dst!==src&&prev[dst]<0)return null;
+    const pe=[]; for(let v=dst;v!==src;v=prev[v])pe.push(prevE[v]); return pe.reverse(); }
+  // --- деревни: население 85–100 (как стартовые в старом), размер = обратная popOf ---
+  const VIL=[]; CENTERS.forEach((c,i)=>{ if(c.type!=='village')return;
+    c.pop=85+Math.round(h2d(c.col*53+11,c.row*29+5)*15); VIL.push({c,i,size:Math.pow(c.pop/30,1/1.6)}); });
+  const nV=VIL.length;
+  // --- пары: остовное дерево. Старый брал прямое расстояние; здесь реки стали стенами, и ближайшая по прямой соседка
+  //     может быть за рекой без брода — поэтому связываем по ЦЕНЕ ПУТИ и только достижимых (?mst=line — по прямой, для сравнения)
+  const cand=[]; let unreach=0;
+  for(let a=0;a<nV;a++){ dijkstra(VIL[a].i,-1,false);
+    for(let b=a+1;b<nV;b++){ const d=dist[VIL[b].i]; if(!isFinite(d)){ unreach++; continue; }
+      const line=Math.hypot(wdx(VIL[a].c.x,VIL[b].c.x),VIL[a].c.z-VIL[b].c.z);
+      cand.push([Qm==='line'?line:d,a,b,line]); } }
+  cand.sort((p,q)=>p[0]-q[0]);
+  const par=VIL.map((_,i)=>i), find=x=>{ while(par[x]!==x){ par[x]=par[par[x]]; x=par[x]; } return x; };
+  const pairs=[]; for(const [,a,b,line] of cand){ const ra=find(a),rb=find(b); if(ra===rb)continue; par[ra]=rb; pairs.push([a,b,line]); }
+  const comps=new Set(VIL.map((_,i)=>find(i))).size;
+  // --- growRoads: раз в ход (14.10, перенос index.html 5625–5643) — поток по рёбрам пути, использование копится и гаснет (×0.88).
+  //     Размер деревни берётся из ТЕКУЩЕГО населения c.pop (растёт по ходам), поэтому дороги к крупным и близким наезжаются.
+  //     Зрелость считается от эталона ROAD_REF (ратчет roadRefMax), как в старом: стартовые тропы — нитки, к зрелости — тракт.
+  const ROAD_REF=0.65; let roadRefMax=ROAD_REF, nGrow=0;
+  function grow(){ flow.fill(0);
+    for(const v of VIL)v.size=Math.pow(Math.max(1,v.c.pop)/30,1/1.6);
+    for(const [a,b,line] of pairs){ const pe=dijkstra(VIL[a].i,VIL[b].i,true); if(!pe||!pe.length)continue;
+      const dO=line/K, g=VIL[a].size*VIL[b].size/(dO*dO+40);                       // большие и близкие — сильнее (расстояние в единицах старого мира)
+      for(const e of pe)flow[e]+=g; }
+    let mx=1e-6; for(let e=0;e<NE;e++){ roadUse[e]=roadUse[e]*0.88+flow[e]; if(roadUse[e]>mx)mx=roadUse[e]; }
+    roadUseMax=mx; if(mx>roadRefMax)roadRefMax=mx; nGrow++; }
+  for(let k=0;k<8;k++)grow();                                    // стартовые тропы (seedStarterRoads): 8 прогонов до первого хода
+  const roadUse0=roadUse.slice(), flow0=flow.slice(), ref0=roadRefMax, max0=roadUseMax;   // снимок «до первого хода» — новая партия начинается с него
+  // --- цепочки «горячих» рёбер (traceChains старого) + сглаживание + сетка сегментов; пересобирается после каждого хода ---
+  // до первого хода рисуем ВСЕ пути последнего прогона (иначе дальняя деревня без тропы — замер 11.10: 4 из 60);
+  // с ходами добавляется правило старого: брошенный объезд виден, пока его использование ≥5% от максимума
+  const G=2, PAD=1.6, Z0=MINZ-6, gnx=Math.ceil(WX/G), gnz=Math.ceil((MAXZ-MINZ+12)/G);
+  let cells=null, polys=[], chains=[], hot=null, nHot=0, totLen=0;
+  const TRACT_T=0.6;                                             // колея старого: t≥0.6 от зрелой дороги → тракт
+  function rebuild(){
+    hot=new Uint8Array(NE); nHot=0; const TH=roadUseMax*0.05;
+    for(let e=0;e<NE;e++)if(flow[e]>0||(nGrow>8&&roadUse[e]>=TH)){ hot[e]=1; nHot++; }
+    const hadj=new Map(), hp=(n,o,e)=>{ if(!hadj.has(n))hadj.set(n,[]); hadj.get(n).push({o,e}); };
+    for(let e=0;e<NE;e++)if(hot[e]){ hp(eA[e],eB[e],e); hp(eB[e],eA[e],e); }
+    const deg=n=>hadj.has(n)?hadj.get(n).length:0, used=new Set(); chains=[];
+    const walk=(start,first)=>{ if(used.has(first.e))return; const seq=[start],es=[]; let cur=start,ne=first;
+      while(ne&&!used.has(ne.e)){ used.add(ne.e); es.push(ne.e); seq.push(ne.o); cur=ne.o; ne=null;
+        if(deg(cur)===2&&CENTERS[cur].type!=='village'){ for(const nb of hadj.get(cur))if(!used.has(nb.e)){ ne=nb; break; } } }
+      if(seq.length>=2)chains.push({seq,es}); };
+    for(const n of hadj.keys())if(deg(n)!==2||CENTERS[n].type==='village')for(const nb of hadj.get(n))walk(n,nb);
+    for(const n of hadj.keys())for(const nb of hadj.get(n))walk(n,nb);
+    // сглаживание (smoothChain старого): змейка поперёк пути + Чайкин ×3; концы брода не качаем — переход остаётся на мелком месте
+    cells=new Array(gnx*gnz).fill(null); polys=[]; totLen=0;
+    const putSeg=(ax,az,bx,bz,t)=>{ if(Math.hypot(bx-ax,bz-az)<1e-6)return;
+      for(const off of [0,-WX,WX]){ const x0=Math.min(ax,bx)+off-PAD-WX0, x1=Math.max(ax,bx)+off+PAD-WX0;
+        if(x1<0||x0>=WX)continue;
+        for(let gx=Math.max(0,Math.floor(x0/G));gx<=Math.min(gnx-1,Math.floor(x1/G));gx++)
+          for(let gz=Math.max(0,Math.floor((Math.min(az,bz)-PAD-Z0)/G));gz<=Math.min(gnz-1,Math.floor((Math.max(az,bz)+PAD-Z0)/G));gz++){
+            const k=gz*gnx+gx; (cells[k]||(cells[k]=[])).push(ax+off,az,bx+off,bz,t); } } };
+    for(const ch of chains){
+      let f=0; for(const e of ch.es)f+=roadUse[e]; f/=ch.es.length;
+      const t=Math.min(1,f/roadRefMax);                                       // 0..1 — сила дороги ОТНОСИТЕЛЬНО зрелой (не текущей), как в старом
+      ch.t=t;
+      const c0=CENTERS[ch.seq[0]], cN=CENTERS[ch.seq[ch.seq.length-1]]; let pts=[[normX(c0.x),c0.z]]; const pin=[false];
+      for(let k=1;k<ch.seq.length;k++){ const c=CENTERS[ch.seq[k]], p=pts[k-1]; pts.push([p[0]+wdx(c.x,CENTERS[ch.seq[k-1]].x),c.z]); pin.push(false); }
+      ch.es.forEach((e,k)=>{ if(eFord[e]>0){ pin[k]=pin[k+1]=true; } });
+      if(pts.length===2&&!pin[0]){ pts.splice(1,0,[(pts[0][0]+pts[1][0])/2,(pts[0][1]+pts[1][1])/2]); pin.splice(1,0,false); }   // две клетки — тоже с изгибом, не отрезком
+      const n=pts.length;
+      if(n>=3){ const seed=h2d(c0.col*19+3,c0.row*23+ch.seq[n>ch.seq.length?1:n-1]%97), amp=0.40*K*(0.6+seed), ph=seed*6.283, freq=1.4+seed*1.6, src=pts.map(p=>p.slice());
+        for(let k=1;k<n-1;k++){ if(pin[k])continue; const a=src[k+1],b=src[k-1]; let dx=a[0]-b[0],dz=a[1]-b[1]; const L=Math.hypot(dx,dz)||1; dx/=L; dz/=L;
+          const u=k/(n-1), w=Math.sin(u*Math.PI*2*freq+ph)*amp*Math.sin(u*Math.PI)+(n===3?amp*0.7*(seed<0.5?-1:1):0);
+          pts[k]=[src[k][0]-dz*w,src[k][1]+dx*w]; } }
+      { const wg=[], sd=3+((c0.col*131+c0.row*7+cN.col*17+cN.row*29)%997)*2.7;   // wiggle — как у дорог полигона (шаг 1.6, размах 0.5); зерно от концов цепи — не прыгает от хода к ходу
+        for(let k=0;k<n-1;k++){ if(pin[k]&&pin[k+1]){ wg.push(pts[k]); continue; }
+          const w2=wiggle([pts[k],pts[k+1]],1.6,0.5,sd); w2.pop(); for(const q of w2)wg.push(q); }
+        wg.push(pts[n-1]); pts=wg; }
+      if(pts.length>2)pts=chaikin(pts,3);
+      for(let k=0;k<pts.length-1;k++){ putSeg(pts[k][0],pts[k][1],pts[k+1][0],pts[k+1][1],t); totLen+=Math.hypot(pts[k+1][0]-pts[k][0],pts[k+1][1]-pts[k][1]); }
+      polys.push(pts); } }
+  rebuild();
+  // --- запросы: краска (hit) и просека для деревьев/камней/травы (near) ---
+  function near(x,z,r){ x=normX(x); const gz=Math.floor((z-Z0)/G); if(gz<0||gz>=gnz)return false;
+    const l=cells[gz*gnx+Math.min(gnx-1,Math.max(0,Math.floor((x-WX0)/G)))]; if(!l)return false;
+    for(let i=0;i<l.length;i+=5){ const ax=l[i],az=l[i+1],vx=l[i+2]-ax,vz=l[i+3]-az;
+      let t=((x-ax)*vx+(z-az)*vz)/(vx*vx+vz*vz); t=t<0?0:t>1?1:t;
+      const dx=x-(ax+vx*t), dz=z-(az+vz*t), rr2=r<0?0.62:r; if(dx*dx+dz*dz<rr2*rr2)return true; }
+    return false; }
+  let lastLv=0;                                                   // зрелость ближайшего сегмента после distTo (краска тракта)
+  function distTo(x,z){ x=normX(x); const gz=Math.floor((z-Z0)/G); lastLv=0; if(gz<0||gz>=gnz)return 9;   // расстояние до ближайшей тропы (дальше PAD — 9)
+    const l=cells[gz*gnx+Math.min(gnx-1,Math.max(0,Math.floor((x-WX0)/G)))]; if(!l)return 9; let m=81;
+    for(let i=0;i<l.length;i+=5){ const ax=l[i],az=l[i+1],vx=l[i+2]-ax,vz=l[i+3]-az;
+      let t=((x-ax)*vx+(z-az)*vz)/(vx*vx+vz*vz); t=t<0?0:t>1?1:t;
+      const dx=x-(ax+vx*t), dz=z-(az+vz*t), d2=dx*dx+dz*dz; if(d2<m){ m=d2; lastLv=l[i+4]; } }
+    return Math.sqrt(m); }
+  function stat(){ const byType={}, hexSet=new Set(); let fords=0; const fordPts=[];
+    for(let e=0;e<NE;e++)if(hot[e]){ hexSet.add(eA[e]); hexSet.add(eB[e]);
+      if(eFord[e]>0){ fords++; for(const q of crossings(CENTERS[eA[e]],CENTERS[eB[e]]))fordPts.push([+q.x.toFixed(1),+q.z.toFixed(1),+q.D.toFixed(2)]); } }
+    for(const i of hexSet){ const t=CENTERS[i].type; byType[t]=(byType[t]||0)+1; }
+    const linked=new Set(); for(const [a,b] of pairs){ linked.add(a); linked.add(b); }
+    const ts=chains.map(c=>c.t).sort((a,b)=>b-a);
+    return {дерево:Qm,деревень:nV,связей:pairs.length,частей_сети:comps,деревень_без_тропы:nV-linked.size,пар_без_пути:unreach,
+      рёбер_графа:NE,рёбер_брод:nFordE,рёбер_стена:nWallE,рёбер_тропы:nHot,цепей:chains.length,клеток_тропы:hexSet.size,
+      длина_клеток:+(totLen/dxH).toFixed(0),бродов_на_тропах:fords,броды:fordPts.slice(0,12),клетки_по_типам:byType,макс_польз:+roadUseMax.toFixed(4),
+      эталон:+roadRefMax.toFixed(3),прогонов:nGrow,трактов:ts.filter(t=>t>=TRACT_T).length,зрелость_топ5:ts.slice(0,5).map(t=>+t.toFixed(3))}; }
+  window.__trailStat=stat();
+  Object.defineProperty(window,'__trailStatNow',{get:stat});
+  window.__trailPolys=()=>polys.map(p=>p.map(q=>[+q[0].toFixed(1),+q[1].toFixed(1)]));
+  window.__tracts=()=>chains.map((c,k)=>({t:+c.t.toFixed(3),p:polys[k][polys[k].length>>1].map(v=>+v.toFixed(1)),n:c.seq.length})).filter(o=>o.t>=TRACT_T);
+  // ход: прогон + пересборка; вернуть число трактов, ставших трактом в этот ход (для журнала)
+  // подпись цепи для перепечки: концы + длина + тракт ли. Перепечь надо только цепи, чья подпись появилась или пропала
+  const sigOf=(c,k)=>c.seq[0]+'_'+c.seq[c.seq.length-1]+'_'+c.seq.length+'_'+(c.t>=TRACT_T?1:0);
+  const boxOf=pts=>{ let x0=1e9,x1=-1e9,z0=1e9,z1=-1e9; for(const p of pts){ if(p[0]<x0)x0=p[0]; if(p[0]>x1)x1=p[0]; if(p[1]<z0)z0=p[1]; if(p[1]>z1)z1=p[1]; } return [x0,z0,x1,z1]; };
+  let dirty=[];
+  function turn(){ const was=new Set(chains.filter(c=>c.t>=TRACT_T).map(c=>c.seq[0]+'_'+c.seq[c.seq.length-1]));
+    const old=new Map(chains.map((c,k)=>[sigOf(c),boxOf(polys[k])]));
+    grow(); rebuild();
+    const nw=new Map(chains.map((c,k)=>[sigOf(c),boxOf(polys[k])]));
+    dirty=[]; for(const [k,b] of old)if(!nw.has(k))dirty.push(b); for(const [k,b] of nw)if(!old.has(k))dirty.push(b);
+    const fresh=chains.filter(c=>c.t>=TRACT_T&&!was.has(c.seq[0]+'_'+c.seq[c.seq.length-1])&&!was.has(c.seq[c.seq.length-1]+'_'+c.seq[0]));
+    return fresh.map(c=>{ const a=CENTERS[c.seq[0]], b=CENTERS[c.seq[c.seq.length-1]]; return {a,b,x:normX((a.x+a.x+wdx(b.x,a.x))/2),z:(a.z+b.z)/2}; }); }
+  function reset(){ roadUse.set(roadUse0); flow.set(flow0); roadRefMax=ref0; roadUseMax=max0; nGrow=8; rebuild(); }
+  // 15.10 (экономика): путь от города до клетки промысла/деревни — одна Дейкстра (с прилипанием к тропам) на источник,
+  // дальше проход по предкам. Грейд ребра: 0 целина, 1 тропа (нарисована), 2 тракт (зрелость ≥ TRACT_T). Клетка без
+  // графа (вода, гора) — путь до проходимой соседки, ближайшей по цене. {L — рёбер, avg — средний грейд 0..2, pts — точки [x,z]}
+  function routeTree(src){ const si=idx.get(src.col+','+src.row); if(si===undefined)return null;
+    dijkstra(si,-1,true); const pv=Int32Array.from(prev), pe=Int32Array.from(prevE), dd=Float64Array.from(dist);
+    const gE=e=>hot&&hot[e]?(Math.min(1,roadUse[e]/roadRefMax)>=TRACT_T?2:1):0;
+    return dst=>{ let di=idx.get(dst.col+','+dst.row); if(di===undefined)return null;
+      if(!cc[di]){ let b=-1,bd=Infinity; for(const [dc,dr] of hexDirs(dst.row)){ const r=dst.row+dr; if(r<0||r>=ROWS)continue;
+          const j=idx.get((((dst.col+dc)%COLS+COLS)%COLS)+','+r); if(j!==undefined&&cc[j]&&dd[j]<bd){ bd=dd[j]; b=j; } }
+        if(b<0)return null; di=b; }
+      if(di!==si&&pv[di]<0)return null;
+      let L=0,gs=0; const seq=[di]; for(let v=di;v!==si;v=pv[v]){ L++; gs+=gE(pe[v]); seq.push(pv[v]); }
+      seq.reverse(); const pts=[[src.x,src.z]]; for(let k=1;k<seq.length;k++){ const c=CENTERS[seq[k]], p=pts[k-1]; pts.push([p[0]+wdx(c.x,CENTERS[seq[k-1]].x),c.z]); }
+      return {L,avg:L?gs/L:2,pts}; }; }
+  function save(){ return Array.from(roadUse,v=>+v.toFixed(5)); }
+  function load(arr){ if(!arr||arr.length!==NE)return false; for(let e=0;e<NE;e++)roadUse[e]=arr[e];
+    let mx=1e-6; for(let e=0;e<NE;e++)if(roadUse[e]>mx)mx=roadUse[e]; roadUseMax=mx; if(mx>roadRefMax)roadRefMax=mx;
+    nGrow=9; flow.fill(0); rebuild(); return true; }
+  // 16.10: граф для отрядов — те же рёбра (стена у глубокой реки), брод, грейд ребра 0 целина / 1 тропа / 2 тракт
+  const graph=()=>({adj,eFord,grade:e=>hot&&hot[e]?(Math.min(1,roadUse[e]/roadRefMax)>=TRACT_T?2:1):0});
+  return {dist:distTo,get lv(){ return lastLv; },near,get polys(){ return polys; },get dirty(){ return dirty; },turn,save,load,reset,statNow:stat,TRACT_T,VIL,routeTree,graph};
+})();
+// --- сплат-веса биомов: ОКНО вокруг камеры (бейк полигонной плотности, перепекается при движении)
+const SPW=3072, SWIN=280;                      // 3072 пикс на 280 м ≈ 11 пикс/м
+let SX0=0,SZ0=0,SW=SWIN,SD=SWIN;               // текущий прямоугольник окна (uSpl)
+const vC=vHex; // та же стартовая деревня куска
+const trailTo=[];
+if(vC){ for(const ty of['field','meadow']){
+    let best=null,bd=1e9;
+    for(const c of CENTERS){ if(c.type!==ty)continue;
+      const d=wdx(c.x,vC.x)**2+(c.z-vC.z)**2; if(d<bd){bd=d;best=c;} }
+    if(best)trailTo.push(best);} }
+function distToSeg(x,z,ax,az,bx,bz){
+  const vx=bx-ax,vz=bz-az,L2=vx*vx+vz*vz;
+  const t=Math.min(1,Math.max(0,((x-ax)*vx+(z-az)*vz)/L2));
+  return Math.hypot(x-(ax+vx*t),z-(az+vz*t));
+}
+const splData=new Uint8Array(SPW*SPW*4);
+const splData2=new Uint8Array(SPW*SPW*4);
+const splData3=new Uint8Array(SPW*SPW*4);
+const splData4=new Uint8Array(SPW*SPW*4);      // R — маска воды: урез/пляж/пена рисуются по ней, не по изовысоте сетки; G — близость тропы (255 на оси, 0 дальше TR_DMAX);
+                                               // B — зрелость ближайшей тропы 0..1 (14.10: ≥0.6 → тракт с колеями, как колея старого движка)
+const TR_DMAX=0.6;
+const gridC=document.createElement('canvas'); gridC.width=gridC.height=SPW;
+function bakeRows(py0,py1){                    // полосы окна: тот же пиксельный цикл, что был на мир
+  let p=py0*SPW*4;
+  for(let py=py0;py<py1;py++){
+    const z=SZ0+(py+0.5)/SPW*SD;
+    for(let px=0;px<SPW;px++){
+      const x=SX0+(px+0.5)/SPW*SW;
+      const jx=x+(Math.sin(x*2.7+z*3.1)*0.5+Math.sin(x*6.3-z*4.7)*0.3+Math.sin(x*11+z*9)*0.2)*1.05;
+      const jz=z+(Math.sin(x*3.3-z*2.5+1)*0.5+Math.sin(x*5.1+z*6.9)*0.3+Math.sin(x*13-z*8)*0.2)*1.05;
+      let c=nearTile(jx,jz);
+      const cC=nearTile(x,z);
+      if(((c&&c.type==='water')?1:0)!==((cC&&cC.type==='water')?1:0))c=cC;
+      let r=0,g2=0,b=0,a=0,sd2=0,sn2=0,tu=0,mh2=0,jg=0,sv2=0;
+      const ty=c?c.type:null;
+      if(!ty)a=255;
+      else if(ty==='mountain'){a=70;tu=90;}        // подложка гор: трава+камень+мох — горы вырастают из долины, не из бурого блюдца
+      else if(ty==='dry')r=255;
+      else if(ty==='hills'&&HLV.includes('2')){ const hn=fbmR(x+7,z+2,230,2); if(hn>0.62)a=150; else r=170; }   // 16.10 ?hl=2: сухая трава, макушки — камень
+      else if(ty==='forest'||ty==='pines')g2=255;
+      let fur=0;
+      if(ty==='field'){ b=255;                                  // 15.10: пашня деревни больше не красится — её полосы и межи строит mkFarm
+        const s2=Math.sin((x*0.866+z*0.5)*10.5);
+        if(s2>0.1)fur=190; }
+      else if(ty==='desert')sd2=255;
+      else if(ty==='snow')sn2=255;
+      else if(ty==='tundra')tu=255;
+      else if(ty==='marsh')mh2=255;
+      else if(ty==='jungle')jg=255;
+      else if(ty==='savanna')sv2=255;
+      else if(ty==='village'){ if(Math.hypot(jx-c.x,jz-c.z)<HEXR*0.74)b=255; }
+      if(vC&&!a&&!sd2&&!sn2){
+        for(const t2 of trailTo){
+          if(distToSeg(normX(jx),jz,vC.x,vC.z,t2.x,t2.z)<0.5){r=0;g2=0;b=255;fur=0;break;} } }
+      splData[p]=r;splData[p+1]=g2;splData[p+2]=b;splData[p+3]=a;
+      splData2[p]=sd2;splData2[p+1]=sn2;splData2[p+2]=fur;splData2[p+3]=0;
+      splData3[p]=tu;splData3[p+1]=mh2;splData3[p+2]=jg;splData3[p+3]=sv2;
+      { // плавное ПОЛЕ воды (метаболы по центрам): берег = дуги; «ближайший гекс» давал прямые отрезки граней
+        let swW2=0,swA=0;                        // поле — от ЧИСТЫХ координат: джиттер у порога 0.5 рвал кромку кляксами
+        const xq=normX(x), gx=Math.floor(xq/CS), gz=Math.floor(z/CS);
+        for(let a2=-1;a2<=1;a2++)for(let b2=-1;b2<=1;b2++){
+          const l=GRID.get(gk(gx+a2,gz+b2)); if(!l)continue;
+          for(const cc of l){ const dd=(cc.x-xq)**2+(cc.z-z)**2;
+            const w3m=Math.max(0,1-dd/(HEXR*HEXR*3.2));    // ядро шире: острые сёдла между «каплями» скругляются
+            const w3=w3m*w3m; swA+=w3; if(cc.type==='water')swW2+=w3; } }
+        splData4[p]=swA>0?Math.min(255,Math.round(255*swW2/swA)):0;
+        trPix(p,x,z,ty); }
+      p+=4;
+    } }
+}
+function trPix(p,x,z,ty){                      // тропа в пиксель окна: G — близость, B — зрелость (зовут bakeRows и перепека троп после хода)
+  const dTr=(ty&&ty!=='water'&&ty!=='mountain')?TRAILS.dist(x,z):9;       // чистые координаты: линия тропы ровная, рваность даёт шейдер
+  splData4[p+1]=dTr<TR_DMAX?Math.round(255*(1-dTr/TR_DMAX)):0;
+  splData4[p+2]=dTr<TR_DMAX+0.3?Math.round(255*TRAILS.lv):0; }
+// перепека ТОЛЬКО троп в текущем окне после хода (вода и биомы не меняются) — полосами по бюджету времени, как splTick
+// После хода перепекаются только ПРЯМОУГОЛЬНИКИ изменившихся цепей (появилась/пропала/стала трактом) — обычно ни одного.
+// Без аргумента — всё окно (новая партия, загрузка). Полосами по бюджету времени, как splTick.
+let trJobs=[],trT0=0,trWork=0;
+window.__retrail=boxes=>{ trT0=performance.now(); trWork=0;
+  if(!boxes){ trJobs=[{px0:0,px1:SPW,py0:0,py1:SPW,row:0}]; return; }
+  trJobs=[]; const P=TR_DMAX+0.4;
+  for(const b of boxes){ const cx=SX0+SW/2;
+    for(const off of [-WX,0,WX]){ const k=Math.round((cx-(b[0]+b[2])/2)/WX)*WX+off;   // лист кольца у окна
+      const px0=Math.max(0,Math.floor((b[0]+k-P-SX0)/SW*SPW)), px1=Math.min(SPW,Math.ceil((b[2]+k+P-SX0)/SW*SPW));
+      const py0=Math.max(0,Math.floor((b[1]-P-SZ0)/SD*SPW)), py1=Math.min(SPW,Math.ceil((b[3]+P-SZ0)/SD*SPW));
+      if(px1>px0&&py1>py0)trJobs.push({px0,px1,py0,py1,row:py0}); } }
+  if(!trJobs.length){ window.__retrailMs=0; window.__retrailWork=0; } };
+function trTick(){ if(!trJobs.length||bakeRow<SPW)return;            // идёт полная перепека окна — тропы испекутся в ней
+  const t0=performance.now();
+  while(trJobs.length&&performance.now()-t0<8){ const J=trJobs[0], to=Math.min(J.py1,J.row+16);
+    for(let py=J.row;py<to;py++){ const z=SZ0+(py+0.5)/SPW*SD; let p=(py*SPW+J.px0)*4;
+      for(let px=J.px0;px<J.px1;px++,p+=4){ const x=SX0+(px+0.5)/SPW*SW;
+        const d=TRAILS.dist(x,z);                                   // сперва расстояние: вдали от троп — ноль без поиска клетки
+        if(d>=TR_DMAX+0.3){ splData4[p+1]=splData4[p+2]=0; continue; }
+        const c=nearTile(x,z); trPix(p,x,z,c?c.type:null); } }
+    J.row=to; if(J.row>=J.py1)trJobs.shift(); }
+  trWork+=performance.now()-t0;
+  if(!trJobs.length){ splT4.needsUpdate=true; window.__retrailMs=Math.round(performance.now()-trT0); window.__retrailWork=Math.round(trWork); } }
+function drawGridLines(){                      // гекс-линии окна в A-канал сплата-2
+  const g=gridC.getContext('2d'); g.clearRect(0,0,SPW,SPW);
+  g.strokeStyle='rgba(35,28,16,0.85)'; g.lineWidth=1.4*(SPW/SWIN)/16.5;   // та же физическая толщина, что в полигоне
+  const mx=x=>(x-SX0)/SW*SPW, mz=z=>(z-SZ0)/SD*SPW;
+  const shG=Math.round((SX0+SW/2)/WX)*WX;
+  for(const c2 of CENTERS){
+    for(const off of [shG-WX,shG,shG+WX]){ const cx=c2.x+off;
+      if(cx<SX0-HEXR||cx>SX0+SW+HEXR||c2.z<SZ0-HEXR||c2.z>SZ0+SD+HEXR)continue;
+      g.beginPath();
+      for(let k=0;k<=6;k++){const a=k/6*Math.PI*2+Math.PI/6;
+        const X=mx(cx+Math.cos(a)*HEXR),Y=mz(c2.z+Math.sin(a)*HEXR);
+        if(k===0)g.moveTo(X,Y);else g.lineTo(X,Y);} g.stroke(); } }
+  const gg=g.getImageData(0,0,SPW,SPW).data;
+  for(let i=0;i<SPW*SPW;i++) splData2[i*4+3]=gg[i*4+3];
+}
+const splT=new THREE.DataTexture(splData,SPW,SPW,THREE.RGBAFormat);
+const splT2=new THREE.DataTexture(splData2,SPW,SPW,THREE.RGBAFormat);
+const splT3=new THREE.DataTexture(splData3,SPW,SPW,THREE.RGBAFormat);
+const splT4=new THREE.DataTexture(splData4,SPW,SPW,THREE.RGBAFormat);
+for(const t of [splT,splT2,splT3,splT4]){t.minFilter=t.magFilter=THREE.LinearFilter;}
+let bakeRow=SPW;                                // SPW = окно готово; меньше = перепекаем
+function splSetWindow(cx,cz){                   // перенести окно и начать перепеку полосами
+  SX0=cx-SWIN/2; SZ0=cz-SWIN/2; SW=SD=SWIN;     // юниформ НЕ трогаем: старое окно живёт до конца перепеки
+  bakeRow=0;
+}
+let splBoost=0;
+window.__probe=(x,z)=>({dRiv:Math.round(riverD(x,z)*100)/100, h:Math.round(heightAt(x,z)*100)/100,
+  tile:(nearTile(x,z)||{}).type});
+window.__findType=t=>CENTERS.filter(c=>c.type===t).map(c=>[+c.x.toFixed(1),+c.z.toFixed(1)]);   // стендовый мост: где гексы типа t
+window.__benchSpl=(rows)=>{ const t0=performance.now(); bakeRows(0,rows); return Math.round((performance.now()-t0)*10)/10; }; // мостик замера (стенд)                                 // 1 после телепорта: печём агрессивно, снаружи всё равно подложка
+function splTick(){                             // бюджет ВРЕМЕНИ, не строк (замер 07.10: полосы строк душили
+  if(bakeRow>=SPW){ splBoost=0; return; }       // поток ~19 с одним кадром на стенде = «1 fps 5-10 с» на M4)
+  const budget=splBoost?24:10;                  // мс на тик (бенч 07.10: 1 строка ≈ 11-14 мс VPS ≈ 4-5 мс M4)
+  const t0=performance.now();
+  while(bakeRow<SPW && performance.now()-t0<budget){
+    const to=Math.min(SPW,bakeRow+(splBoost?6:3));
+    bakeRows(bakeRow,to); bakeRow=to;
+  }
+  if(bakeRow>=SPW){ drawGridLines();
+    if(terU)terU.uSpl.value.set(SX0,SZ0,SW,SD); // атомарно: карта и текстуры одним кадром
+    splT.needsUpdate=true; splT2.needsUpdate=true; splT3.needsUpdate=true; splT4.needsUpdate=true;
+    if(!window.__t_bake)window.__t_bake=Math.round(performance.now());
+  }
+}
+// --- подложка-карта МИРА (пиксель на гекс): показывается вне свежего сплат-окна вместо
+// clamp-растяжки краёв («полосы при переезде», скрин 04.10); цвета сразу в linear
+const gSplTex=(()=>{
+  const PAL={water:[52,110,165],meadow:[111,156,68],forest:[47,85,40],pines:[36,69,49],
+    hills:[122,138,78],mountain:[90,82,71],snow:[216,221,226],desert:[212,188,130],
+    dry:[194,184,104],tundra:[157,166,139],marsh:[77,91,56],jungle:[42,82,40],
+    savanna:[180,105,45],village:[194,149,96],field:[168,150,112]};   // 23.10: саванна рыжая и в подложке — хаки зеленила дальний вид
+  const d=new Uint8Array(COLS*ROWS*4);
+  for(let r=0;r<ROWS;r++)for(let c2=0;c2<COLS;c2++){
+    const pc=PAL[KEY[MAP[r][c2]]]||[120,120,120], o=(r*COLS+c2)*4;
+    d[o]  =Math.round(255*Math.pow(pc[0]/255,2.2));
+    d[o+1]=Math.round(255*Math.pow(pc[1]/255,2.2));
+    d[o+2]=Math.round(255*Math.pow(pc[2]/255,2.2)); d[o+3]=255; }
+  const t=new THREE.DataTexture(d,COLS,ROWS,THREE.RGBAFormat);
+  t.magFilter=THREE.LinearFilter; t.minFilter=THREE.LinearFilter;
+  t.generateMipmaps=false; t.wrapS=THREE.RepeatWrapping; t.needsUpdate=true; return t;
+})();
+// --- меш полотна: ЧАНКИ вокруг камеры (LOD: близко 0.30, дальше 0.9; юбка прячет стыки)
+const terMat=photoMat('Grass005',1);
+terMat.aoMap=null; // освобождён текстурный юнит: Safari/Metal даёт фрагменту максимум 16 семплеров,
+                   // с подложкой tSplG их стало 17 → шейдер не компилился, земля исчезала (скрин 04.10 22:55)
+let terU=null;
+terMat.onBeforeCompile=sh=>{
+  Object.assign(sh.uniforms,{
+    tDry:{value:M.dry.map},tFloor:{value:M.ffloor.map},tDirt:{value:M.dirt.map},
+    tRock:{value:M.rock.map},tSand:{value:M.sand.map},tSnow:{value:M.snowCap.map},
+    tTundra:{value:M.tundra.map},
+    tSplat:{value:splT},tSplat2:{value:splT2},tSplat3:{value:splT3},tSplat4:{value:splT4},
+    uGrid:{value:0.45},uSpl:{value:new THREE.Vector4(SX0,SZ0,SW,SD)},
+    uRiv:{value:(()=>{ const arr=[];                 // парами (a,b); кормит updRivU из RSEG у камеры
+      while(arr.length<128)arr.push(new THREE.Vector2(9999,9999));
+      return arr;})()},
+    uTrail:{value:(()=>{ // дороги: извилистые полилинии, в юниформ — парами (a,b) на сегмент
+      const arr=[];
+      const lines=[];
+      if(vC){ for(const t2 of trailTo)lines.push([[vC.x,vC.z],[t2.x,t2.z]]);
+              lines.push([[vC.x,vC.z],[vC.x-4.5,vC.z+4.2],[vC.x-8.5,vC.z+9.5]]); } // демо-тракт на ЮЗ
+      lines.forEach((ln,i)=>{ const pts=chaikin(wiggle(ln,1.6,0.5,3+i*2.7),1);
+        for(let k=0;k<pts.length-1&&arr.length<62;k++)
+          arr.push(new THREE.Vector2(pts[k][0],pts[k][1]),new THREE.Vector2(pts[k+1][0],pts[k+1][1])); });
+      while(arr.length<64)arr.push(new THREE.Vector2(9999,9999));
+      return arr.slice(0,64);})()},
+    uRV:{value:RV},uRD:{value:RD},uTR:{value:+(Q0.get('tr')||1)},uCamD:{value:40},uTime:{value:0},
+    tSplG:{value:gSplTex},uWorld:{value:new THREE.Vector4(WX0,MINZ,WX,MAXZ-MINZ)}});
+  terU=sh.uniforms;
+  sh.vertexShader=sh.vertexShader
+    .replace('#include <common>','#include <common>\nvarying vec2 vWxz;varying float vWy;varying float vSlope;')
+    .replace('#include <begin_vertex>',`#include <begin_vertex>
+      vec4 _wp=modelMatrix*vec4(transformed,1.0); vWxz=_wp.xz; vWy=_wp.y;
+      vSlope=1.0-abs(normalize((modelMatrix*vec4(objectNormal,0.0)).xyz).y);`);
+  sh.fragmentShader=sh.fragmentShader
+    .replace('#include <common>',`#include <common>
+      uniform sampler2D tDry,tFloor,tDirt,tRock,tSand,tSnow,tTundra,tSplat,tSplat2,tSplat3,tSplat4;
+      uniform sampler2D tSplG;uniform vec4 uWorld;
+      uniform float uGrid;uniform vec4 uSpl;varying vec2 vWxz;varying float vWy;varying float vSlope;
+      uniform vec2 uRiv[128];uniform vec2 uTrail[64];uniform float uRV,uRD,uTR,uCamD,uTime;
+      float gRiverBand=0.0;   // тело реки, из map_fragment в roughness (блеск воды)
+      float dSeg(vec2 p,vec2 a,vec2 b){vec2 v=b-a;float t=clamp(dot(p-a,v)/max(dot(v,v),1e-6),0.0,1.0);return length(p-(a+v*t));}
+      float h21(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+      float vn2(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+        return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);}
+      float fbm2(vec2 p){return vn2(p)*0.55+vn2(p*2.3+7.7)*0.3+vn2(p*5.1+17.3)*0.15;}`)
+    .replace('#include <map_fragment>',`#include <map_fragment>
+    { vec2 su=(vWxz-uSpl.xy)/uSpl.zw;
+      float inWin=smoothstep(0.0,0.05,su.x)*smoothstep(1.0,0.95,su.x)*smoothstep(0.0,0.05,su.y)*smoothstep(1.0,0.95,su.y); // переход окно→подложка ~14 м: резкая граница резала остров/песок «срезами» (скрин 07.10 16:29)
+      vec4 sp=texture2D(tSplat,su);
+      vec4 sp2=texture2D(tSplat2,su);
+      vec2 du=vMapUv;
+      vec3 c=diffuseColor.rgb;
+      // 17.10 степь B (Артём: «луг и степь не отличаются»): сухая соломенно-оливковая трава (было ×(0.99,0.93,0.72) — почти зелень)
+      { vec3 dt=texture2D(tDry,du).rgb; dt=mix(dt,vec3(dot(dt,vec3(0.3,0.59,0.11))),0.6)*vec3(1.42,1.16,0.42);  // 23.10: сильнее выцветить — контраст к лугу
+        c=mix(c,dt,sp.r);
+        float bp=smoothstep(0.62,0.74,fbm2(vWxz*0.42));   // пятна сухостоя: fbm-кляксы вместо синус-овалов (23.10, Артём: «овалы → кляксы»)
+        c=mix(c,texture2D(tDry,du*1.3).rgb*vec3(1.42,1.24,0.5),bp*0.85*sp.r);
+        float bp2=smoothstep(0.58,0.72,fbm2(vWxz*0.2+vec2(37.7,19.1)));  // ТЁМНЫЕ прогалины-кляксы — главный запрос 23.10
+        c=mix(c,texture2D(tDirt,du*0.8).rgb*vec3(0.72,0.6,0.42),bp2*0.7*sp.r); }
+      // 08.10: пятнистость травы — сухие проплешины макро-шумом, однотонная «заливка» островов ломается
+      float ptch=smoothstep(0.42,0.75, sin(vWxz.x*0.41+sin(vWxz.y*0.37)*1.7)*sin(vWxz.y*0.43+sin(vWxz.x*0.31)*1.7)); // круглые пятна, не полосы (суммы синусов давали жёлтые ленты-«тропинки»)
+      c=mix(c,texture2D(tDry,du).rgb*vec3(1.02,0.95,0.72),ptch*0.15);
+      c=mix(c,texture2D(tFloor,du*0.85).rgb,sp.g);
+      c=mix(c,texture2D(tDirt,du*0.8).rgb,sp.b);
+      // скала трипланарно: на отвесах семпл по вертикальной проекции, не растяжка сверху
+      vec3 rockTop=texture2D(tRock,du*0.5).rgb;
+      vec3 rockSide=texture2D(tRock,vec2((vWxz.x+vWxz.y)*0.35,vWy*0.45)).rgb;
+      vec3 rockC=mix(rockTop,rockSide,smoothstep(0.3,0.6,vSlope));
+      c=mix(c,rockC,sp.a);
+      c=mix(c,texture2D(tSand,du*0.7).rgb*vec3(1.22,1.06,0.74),sp2.r);   // дюнный песок, золотистый
+      vec4 sp3=texture2D(tSplat3,su);
+      c=mix(c,texture2D(tTundra,du*0.9).rgb*vec3(0.95,0.98,0.9),sp3.r);            // тундра-мох
+      c=mix(c,texture2D(tDirt,du*0.8).rgb*vec3(0.36,0.46,0.3),sp3.g);              // болотная жижа, тёмная
+      c=mix(c,texture2D(tFloor,du*0.7).rgb*vec3(0.5,0.88,0.4),sp3.b);              // джунгли-подлесок
+      { vec3 sv=vec3(dot(texture2D(tDry,du).rgb,vec3(0.3,0.59,0.11)))*vec3(2.2,1.27,0.52);  // 23.10: саванна рыжая; полная десатурация — оттенок tDry зелёнил её в оливу (красная проба)
+        c=mix(c,sv,sp3.a);
+        float svp=smoothstep(0.62,0.76,fbm2(vWxz*0.15+vec2(71.3,53.9)));           // кляксы красноватой латеритной земли
+        c=mix(c,texture2D(tDirt,du*0.8).rgb*vec3(1.15,0.72,0.5),svp*0.6*sp3.a); }
+      c*=1.0-sp2.b*0.4;                              // борозды пашни
+      float dRB=1e9;
+      if(uRV>2.5){ for(int i=0;i<64;i++) dRB=min(dRB,dSeg(vWxz,uRiv[2*i],uRiv[2*i+1])); } // rv3: у реки песка нет — трава до уреза
+      // ПОЛЕ воды из сплата (метаболы, 0.5 = урез): берег = плавные дуги, полосы — по полю, не по изовысоте сетки
+      float wm=texture2D(tSplat4,su).r;
+      // 08.10: границы поля воды ворпаются В МЕТРАХ (±2.5 м, как лечили «ромбы озёр») —
+      // прежний джиттер ±0.018 поля сдвигал край на сантиметры, прямые грани гексов оставались
+      vec2 wrp=vec2(sin(vWxz.y*0.9+vWxz.x*0.37)+0.5*sin(vWxz.y*2.3-vWxz.x*1.1),
+                    sin(vWxz.x*0.8-vWxz.y*0.41)+0.5*sin(vWxz.x*2.1+vWxz.y*1.3))*1.7;
+      float wmj=texture2D(tSplat4,su+wrp/vec2(uSpl.z,uSpl.w)).r;
+      float noDeep=1.0-smoothstep(-0.45,-0.60,vWy);   // 09.10: песок гаснет сразу под урезом — подводные языки не светят
+      float sandPatch=smoothstep(0.30,0.62, sin(vWxz.x*0.16+sin(vWxz.y*0.13)*2.3)*sin(vWxz.y*0.145+sin(vWxz.x*0.11)*2.1)+0.25); // 09.10: пляж ПЯТНАМИ (~40% побережья), не сплошная лента-«тропинка»
+      float beach=0.0; // 09.10: прибрежный песок УБРАН (эксперимент t-nobeach: жёлтая лента-«тропинка» = он; без него берега как в Civ6 — трава к воде, песок только биомом)
+      // 08.10: ВЫСОТНЫЙ песок УДАЛЁН — красил любую прибрежную низину жёлтой лентой вдоль берега
+      // («тропинки» со скринов 22:02; фиксы кольца их не трогали — потому «всё осталось как было»)
+      beach*=(1.0-sp.a)*(1.0-smoothstep(0.05,0.35,sp3.g))*smoothstep(2.6,4.6,dRB)*inWin; // у рек песка нет и ДАЛЬШЕ от оси (кайма у проток, 07.10); *inWin: пунктир 05.10
+      c=mix(c,texture2D(tSand,du).rgb*vec3(1.18,1.1,0.9),beach);   // 09.10: песок спокойнее — не кричащий жёлтый
+      float rkn=sin(vWxz.x*2.1+vWxz.y*1.6)*0.6+sin(vWxz.x*5.3-vWxz.y*3.7)*0.4;   // 08.10: рваная граница скалы
+      float rk=smoothstep(0.36,0.80,vSlope+rkn*0.09); // шире и с шумом — «акульи зубы» рёбер сетки расплываются
+      c=mix(c,rockC,rk*(1.0-beach));
+      float hn=sin(vWxz.x*1.9+vWxz.y*1.3)*0.18+sin(vWxz.x*0.7-vWxz.y*0.9)*0.22;
+      float sn=max(sp2.g,smoothstep(2.05+hn,3.0+hn,vWy));    // снег: тайлы + высота, переход шире
+      sn*=1.0-smoothstep(0.55,0.75,vSlope);                  // на отвесе не держится
+      // два масштаба ломают квадратный повтор; белее к вершинам и северному краю
+      vec3 snowC=mix(texture2D(tSnow,du*0.8).rgb,texture2D(tSnow,du*0.19).rgb,0.55);
+      float wh=0.32*smoothstep(1.8,3.2,vWy)+0.32*smoothstep(8.0,17.0,-vWxz.y);
+      snowC=mix(snowC*1.08,vec3(0.93,0.95,0.99),wh);   // белее к верхам, но фактура остаётся
+      c=mix(c,snowC,sn);
+      float uw=smoothstep(-0.45,-1.3,vWy);            // 09.10: дно темнеет раньше — мель не белёсая
+      uw=max(uw,sp3.g*smoothstep(-0.42,-0.75,vWy));   // в болоте чернота сразу от уреза
+      vec3 deepC=mix(vec3(0.10,0.22,0.26),vec3(0.045,0.075,0.03),sp3.g); // болотные окна почти чёрные
+      c=mix(c,deepC,uw*0.9);
+      // вода у кромки КРАСКОЙ по полю: градиент отмель → ТОЧНЫЙ видимый цвет глади (замер с кадра) —
+      // пила сетки тонет в равном цвете, видимый урез = дуга поля; высотный гейт мягкий (поле и рельеф могут расходиться)
+      // 08.10 по эталону Civ6 (кроп Baltimore): СВЕТЛОГО ОБОДКА ВОКРУГ СУШИ НЕТ — только узкая
+      // подводка цвета глади у самого уреза (закрывает щели сетки), дальше настоящая гладь
+      float wPaint=smoothstep(0.49,0.545,wmj)*smoothstep(-0.82,-0.68,vWy)*(1.0-smoothstep(-0.60,-0.555,vWy))*inWin; // 09.10: СТРОГО ПОД урезом −0.62 — выше она красила полосу суши голубой «слизью» по периметру (рампа плющит берег в полку на этих высотах)
+      vec3 shoreW=mix(vec3(0.125,0.29,0.44),vec3(0.105,0.26,0.42),smoothstep(0.52,0.62,wmj)); // в тон затемнённой глади (шаг 2)
+      c=mix(c,shoreW,wPaint);
+      float foam=(1.0-smoothstep(0.008,0.028,abs(wm-0.5)))*0.15*inWin;  // 09.10: едва заметная нить (молочная полоса у берега — вердикт-кружки 00:49)
+      float foamK=0.7*(1.0-sp3.g*0.75);
+      foamK*=mix(1.0,0.3,1.0-smoothstep(1.4,2.6,dRB));   // у реки пена едва заметна (не подсвечивать ступени сетки)
+      c=mix(c,vec3(0.88,0.93,0.92),foam*foamK);
+      float mn=sin(vWxz.x*0.55+vWxz.y*0.83)*0.5+sin(vWxz.x*1.35-vWxz.y*0.6+1.7)*0.3
+        +sin(vWxz.x*0.21+vWxz.y*0.17+4.2)*0.7;
+      c*=1.0+mn*0.10*(1.0-sn);
+      // --- ПРОБА: дороги краской (чёткие, аналитически по полилинии) ---
+      if(uRD>0.5){
+        float dT=1e9;
+        for(int i=0;i<32;i++) dT=min(dT,dSeg(vWxz,uTrail[2*i],uTrail[2*i+1]));
+        float rough=sin(vWxz.x*3.1+vWxz.y*2.3)*0.5+sin(vWxz.x*7.7-vWxz.y*5.1)*0.3;
+        vec3 dust=texture2D(tSand,du*1.3).rgb*vec3(1.02,0.9,0.7);
+        dust=mix(dust,texture2D(tDirt,du*1.1).rgb*vec3(1.05,0.95,0.8),0.45);
+        if(uRD<1.5){                                   // rd=1: ТРОПИНКА — узкая, рваная, местами зарастает
+          float w=0.10+rough*0.03;
+          float m=1.0-smoothstep(w-0.05,w+0.06,dT);
+          m*=0.40+0.60*smoothstep(-0.5,0.5,sin(vWxz.x*1.7-vWxz.y*2.2)+rough);   // протоптано пятнами
+          c=mix(c,mix(dust,c,0.25),m*0.85);
+        } else {                                       // rd=2: НАЕЗЖЕННЫЙ ТРАКТ — шире, колеи, кантик
+          float w=0.20,e=0.06;
+          float m=1.0-smoothstep(w-e,w+e,dT);
+          c=mix(c,dust,m*0.9);
+          float rut=smoothstep(0.03,0.0,abs(dT-0.08));
+          c=mix(c,dust*0.72,rut*m);                                             // две колеи
+          c=mix(c,dust*0.78,smoothstep(0.05,0.0,abs(dT-w))*0.45);               // кантик
+        }
+      }
+      // --- ТРОПЫ МЕЖДУ ДЕРЕВНЯМИ (11.10): тот же вид, что проба выше, но расстояние — из запечённой маски (сеть не влезает в юниформ) ---
+      // tr=1 (умолчание) — тропинка, а наезженная (зрелость ≥0.6) — тракт; tr=2 — показать всю сеть трактом; tr=0 — скрыть
+      if(uTR>0.5){
+        vec2 su5=(vWxz-uSpl.xy)/uSpl.zw;
+        float in5=step(0.0,su5.x)*step(su5.x,1.0)*step(0.0,su5.y)*step(su5.y,1.0);
+        float tg=texture2D(tSplat4,su5).g*in5;
+        if(tg>0.004){
+          float dT=(1.0-tg)*0.6;
+          float zk=1.0+1.0*smoothstep(60.0,140.0,uCamD);                 // читаемость с отлёта — как у речной нитки
+          float rough=sin(vWxz.x*3.1+vWxz.y*2.3)*0.5+sin(vWxz.x*7.7-vWxz.y*5.1)*0.3;
+          vec3 dust=texture2D(tSand,du*1.3).rgb*vec3(1.02,0.9,0.7);
+          dust=mix(dust,texture2D(tDirt,du*1.1).rgb*vec3(1.05,0.95,0.8),0.45);
+          float lv=${Q0.get('nolv')?'0.0':'texture2D(tSplat4,su5).b'};               // 14.10: зрелость тропы (наезженность по ходам); ≥0.6 → тракт. ?nolv=1 — проба «чёрной земли» в Safari
+          if(uTR<1.5&&lv<0.6){                             // ТРОПИНКА — узкая, рваная, местами зарастает
+            float w=(0.10+rough*0.03)*zk;
+            float m=1.0-smoothstep(w-0.05,w+0.06,dT);
+            m*=0.40+0.60*smoothstep(-0.5,0.5,sin(vWxz.x*1.7-vWxz.y*2.2)+rough);   // протоптано пятнами
+            c=mix(c,mix(dust,c,0.25),m*0.85);
+          } else {                                       // НАЕЗЖЕННЫЙ ТРАКТ — шире, колеи, кантик
+            float w=0.20*zk,e=0.06;
+            float m=1.0-smoothstep(w-e,w+e,dT);
+            c=mix(c,dust,m*0.9);
+            float rut=smoothstep(0.03,0.0,abs(dT-0.08*zk));
+            c=mix(c,dust*0.72,rut*m);                                             // две колеи
+            c=mix(c,dust*0.78,smoothstep(0.05,0.0,abs(dT-w))*0.45);               // кантик
+          }
+        }
+      }
+      // --- ПРОБА: река «нарисованная» (rv1/2 лента, rv4 нитка-зеркало; rv3 — настоящее русло) ---
+      if((uRV>0.5&&uRV<2.5)||uRV>3.5){
+        float dR=1e9;
+        for(int i=0;i<64;i++) dR=min(dR,dSeg(vWxz,uRiv[2*i],uRiv[2*i+1]));
+        dR+=(sin(vWxz.x*2.9+vWxz.y*2.1)*0.6+sin(vWxz.x*6.1-vWxz.y*4.3)*0.4)*0.05; // рваный живой край
+        float W=uRV>3.5?(0.12+0.025*sin(vWxz.x*0.8+vWxz.y*0.6))     // rv4: нитка — вода в русле от глади; лента-пластырь на порогах убрана (08.10: чиним прокоп, не маскируем)
+                       :(0.34+0.08*sin(vWxz.x*0.7+vWxz.y*0.55));   // rv1/2: узкая, ширина дышит
+        W*=1.0+1.0*smoothstep(60.0,140.0,uCamD);                   // лёгкая помощь читаемости с отлёта; ×4.5 раздувало реки (вердикт 04.10)
+        float band=1.0-smoothstep(W,W+0.06,dR);                    // тело реки
+        float core=1.0-smoothstep(0.0,W,dR);
+        // цвета пипеткой с Civ6: нейтральная серо-голубая вода, темней к оси и в тени берега
+        vec3 wcol=mix(vec3(0.20,0.26,0.30),vec3(0.07,0.12,0.16),sqrt(core));   // как было 06.10 (возврат: «было же нормально»)
+        // рисованных «пятен неба» нет: блеск даёт только физическое отражение (roughness)
+        if(uRV>1.5&&uRV<2.5){ float glint=smoothstep(0.82,1.0,sin(vWxz.x*5.2+vWxz.y*7.7)*sin(vWxz.x*2.9-vWxz.y*3.3+2.0));
+          wcol+=glint*vec3(0.18,0.19,0.19)*core; }                 // рисованная рябь — только в rv2
+        float seaFade=1.0-smoothstep(-0.55,-0.9,vWy);              // в море растворяется
+        band*=seaFade;
+        c=mix(c,wcol,band*0.97);
+        gRiverBand=band;                                           // roughness → зеркальность воды
+        float wetR=uRV>3.5?0.28:0.55;                              // rv4: мокрая кромка совсем узкая
+        float wet=smoothstep(wetR,0.0,dR-W)*(1.0-band);            // мокрый тёмный берег вместо песка
+        c=mix(c,c*vec3(0.55,0.53,0.48),wet*(uRV>3.5?0.5:0.75)*seaFade*(1.0-sn));
+        c=mix(c,vec3(0.055,0.075,0.08),smoothstep(0.05,0.0,abs(dR-W))*(uRV>3.5?0.4:0.6)*seaFade); // тёмная урезная линия
+      }
+      c=mix(c,vec3(0.14,0.11,0.06),sp2.a*uGrid*inWin);   // гекс-линии; *inWin: их clamp-обрезки рисовали «пунктир под прямым углом» за краем окна
+      // вне свежего окна краски — подложка-карта мира (вместо clamp-растяжки «полосами»)
+      vec2 gu=vec2(fract((vWxz.x-uWorld.x)/uWorld.z),clamp((vWxz.y-uWorld.y)/uWorld.w,0.0,1.0));
+      c=mix(texture2D(tSplG,gu).rgb,c,inWin);
+      diffuseColor.rgb=c; }`)
+    .replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
+      roughnessFactor=mix(roughnessFactor,0.07,gRiverBand);`)          // вода зеркалит небо и солнце
+    .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+      normal=normalize(mix(normal,nonPerturbedNormal,gRiverBand*0.9));`);  // гладь без рельефа травы
+};
+
+// uRiv: 32 ближайших к камере сегмента рек (парами), из RSEG; обновление при сдвиге >12 м
+let rivUX=1e9,rivUZ=1e9;
+function updRivU(x,z){
+  if(!terU)return;
+  if(Math.hypot(x-rivUX,z-rivUZ)<12)return;
+  rivUX=x; rivUZ=z;
+  const xx=normX(x), sh=x-xx, R2=130, cand=[], seen=new Set();
+  for(let gx=Math.floor((xx-R2)/RCS2);gx<=Math.floor((xx+R2)/RCS2);gx++)
+    for(let gz=Math.floor((z-R2)/RCS2);gz<=Math.floor((z+R2)/RCS2);gz++){
+      const l=RSEG.get(rk2(gx,gz)); if(!l)continue;
+      for(const g of l){
+        const off=Math.round((g[0]-RIVLIST[g[4]].pts[g[5]][0])/WX);
+        const id=(g[4]*100000+g[5])*3+off+1; if(seen.has(id))continue; seen.add(id);
+        const mx=(g[0]+g[2])/2,mz=(g[1]+g[3])/2;
+        cand.push([Math.hypot(mx-xx,mz-z),g]); } }
+  cand.sort((a,b)=>a[0]-b[0]);
+  const u=terU.uRiv.value;
+  for(let k=0;k<64;k++){
+    if(k<cand.length){ const g=cand[k][1];
+      u[2*k].set(g[0]+sh,g[1]); u[2*k+1].set(g[2]+sh,g[3]); }
+    else { u[2*k].set(9999,9999); u[2*k+1].set(9999,9999); } }
+}
+const CHN=23, CH=WX/CHN;                        // по X ровно 23 чанка на период кольца
+const CH_NEAR=85, CH_FAR=235, CH_DROP=260;   // откат 02.10: мельчение дальней сетки забраковано, лечим лесенку позже
+const terChunks=new Map();                      // "ix,iz,lod" → Mesh
+const terQueue=[];
+function chunkGeo(ix,iz,seg){
+  const n=Math.max(8,Math.round(CH/seg));
+  // внешнее кольцо вершин прижато к границе и уходит отвесно вниз (стенка в щель);
+  // нормали — аналитически из сетки высот: computeVertexNormals красил кромку в тень стенки
+  const cell=CH/n;
+  const g=new THREE.PlaneGeometry(CH+2*cell,CH+2*cell,n+2,n+2);
+  g.rotateX(-Math.PI/2);
+  const pos=g.attributes.position, uv=g.attributes.uv;
+  const bx=ix*CH+CH/2, bz=iz*CH+CH/2, h=CH/2;
+  const W=n+3, H=new Float32Array(W*W);
+  for(let i=0;i<pos.count;i++){
+    let lx=pos.getX(i), lz=pos.getZ(i);
+    lx=Math.min(h,Math.max(-h,lx)); lz=Math.min(h,Math.max(-h,lz));
+    pos.setX(i,lx); pos.setZ(i,lz);
+    H[i]=heightAt(bx+lx,bz+lz);
+    uv.setXY(i,(bx+lx)/2.2,(bz+lz)/2.2); }
+  // снап кромки к урезу (лесенка берега, приём 15.09): на ребре со сменой знака (H−WL)
+  // ближняя вершина тянется в точку изолинии → контур берега идёт по урезу, а не по квадратам сетки.
+  // Граничные вершины чанка (слои 0,1 и W-2,W-1) поперёк границы не двигаем — стыки чанков совпадают.
+  {
+    const WL=-0.5, mvd=new Uint8Array(W*W);
+    for(let r=1;r<W-1;r++)for(let c2=1;c2<W-1;c2++){
+      const i=r*W+c2;
+      if(c2<W-2){ const j=i+1, a=H[i]-WL, b2=H[j]-WL;
+        if((a>0)!==(b2>0)){ let t=a/(a-b2); t=Math.min(0.96,Math.max(0.04,t));
+          const near=t<0.5?i:j, cn=near%W;
+          if(!mvd[near]&&cn>1&&cn<W-2){ mvd[near]=1;
+            pos.setX(near,pos.getX(i)+(pos.getX(j)-pos.getX(i))*t); H[near]=WL+0.03; } } }
+      if(r<W-2){ const j=i+W, a=H[i]-WL, b2=H[j]-WL;
+        if((a>0)!==(b2>0)){ let t=a/(a-b2); t=Math.min(0.96,Math.max(0.04,t));
+          const near=t<0.5?i:j, rn=(near-near%W)/W;
+          if(!mvd[near]&&rn>1&&rn<W-2){ mvd[near]=1;
+            pos.setZ(near,pos.getZ(i)+(pos.getZ(j)-pos.getZ(i))*t); H[near]=WL+0.03; } } }
+    }
+  }
+  const nrm=new Float32Array(pos.count*3);
+  for(let r=0;r<W;r++)for(let c=0;c<W;c++){
+    const i=r*W+c;
+    const tc=Math.max(1,Math.min(W-2,c)), tr=Math.max(1,Math.min(W-2,r));
+    const ca=Math.max(1,tc-2), cb=Math.min(W-2,tc+2);   // 08.10: градиент шире (±2 ячейки) —
+    const ra=Math.max(1,tr-2), rb=Math.min(W-2,tr+2);   // светотень не цепляет каждую грань, «рёбра» склонов гаснут
+    const nx=((H[tr*W+ca]-H[tr*W+cb])+0.5*(H[ra*W+ca]-H[ra*W+cb])+0.5*(H[rb*W+ca]-H[rb*W+cb]))/(2.0*(cb-ca)*cell);
+    const nz=((H[ra*W+tc]-H[rb*W+tc])+0.5*(H[ra*W+ca]-H[rb*W+ca])+0.5*(H[ra*W+cb]-H[rb*W+cb]))/(2.0*(rb-ra)*cell);
+    const l=1/Math.hypot(nx,1,nz);
+    nrm[i*3]=nx*l; nrm[i*3+1]=l; nrm[i*3+2]=nz*l; }
+  g.setAttribute('normal',new THREE.BufferAttribute(nrm,3));
+  for(let r=0;r<W;r++)for(let c=0;c<W;c++){
+    const i=r*W+c, out=(r===0||c===0||r===W-1||c===W-1);
+    pos.setY(i,H[i]-(out?1.6:0)); }
+  return g; }
+function terRescan(tx,tz){
+  terQueue.length=0;
+  const ix0=Math.round(tx/CH), iz0=Math.round(tz/CH), R=Math.ceil(CH_FAR/CH);
+  for(const [key,msh] of terChunks){
+    const [ix,iz]=key.split(',').map(Number);
+    const d=Math.hypot((ix*CH+CH/2)-tx,(iz*CH+CH/2)-tz);
+    if(d>CH_DROP){ scene.remove(msh); msh.geometry.dispose(); terChunks.delete(key); } }
+  for(let dx=-R;dx<=R;dx++)for(let dz=-R;dz<=R;dz++){
+    const ix=ix0+dx, iz=iz0+dz;
+    const d=Math.hypot((ix*CH+CH/2)-tx,(iz*CH+CH/2)-tz);
+    if(d>CH_FAR)continue;
+    // гистерезис ±9 м: чанк на границе зон не мечется между сетками (дрожали берега)
+    const w=d<CH_NEAR-9?0:(d>CH_NEAR+9?1:null);
+    if(w===null){ if(!terChunks.has(ix+','+iz+',0')&&!terChunks.has(ix+','+iz+',1'))
+        terQueue.push([d,ix,iz,d<CH_NEAR?0:1]); }
+    else if(!terChunks.has(ix+','+iz+','+w))terQueue.push([d,ix,iz,w]);
+  }
+  terQueue.sort((a,b)=>a[0]-b[0]);
+}
+function terTick(ms){                 // бюджет времени: на быстрой машине 1-2 чанка, на медленной не душит кадр
+  const t0=performance.now();
+  while(terQueue.length&&performance.now()-t0<ms){
+    const [d,ix,iz,lod]=terQueue.shift();
+    const key=ix+','+iz+','+lod; if(terChunks.has(key))continue;
+    const seg=lod===0?0.30:0.9;
+    const msh=new THREE.Mesh(chunkGeo(ix,iz,seg),terMat);
+    msh.position.set(ix*CH+CH/2,0,iz*CH+CH/2);
+    msh.castShadow=msh.receiveShadow=true;
+    scene.add(msh); terChunks.set(key,msh);
+    const ok=ix+','+iz+','+(lod?0:1);             // сменили сетку — старую убрать тем же шагом (без дыры и мерцания)
+    if(terChunks.has(ok)){ const m2=terChunks.get(ok); scene.remove(m2); m2.geometry.dispose(); terChunks.delete(ok); } } }
+// ================= ВОДА СТАРОГО ДВИЖКА 1-в-1 (07.10) =================
+// Перенос шейдера воды из site/index.html:3657-3749 целиком: цвет по глубине (3 тона),
+// пена у берега, двухслойная бегущая рябь по МИРОВЫМ координатам (узор стоит в мире —
+// вода живёт при перемещении карты), discard на суше (ни муара, ни пустой прорисовки).
+// Шумы и normal-map — те же функции, что в старом движке.
+function ihash2(x,y){ let n=(Math.imul(x|0,374761393)+Math.imul(y|0,668265263))|0;
+  n=Math.imul(n^(n>>>13),1274126177); n^=n>>>16; return (n>>>0)/4294967296; }
+function valueNoise2i(x,y){
+  const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi;
+  const sm=t=>t*t*(3-2*t), u=sm(xf), v=sm(yf);
+  const a=ihash2(xi,yi), b=ihash2(xi+1,yi), c=ihash2(xi,yi+1), d=ihash2(xi+1,yi+1);
+  return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v; }
+function fbm2i(x,y,octaves){
+  let total=0, amp=0.55, freq=1;
+  for(let o=0;o<octaves;o++){ total+=valueNoise2i(x*freq,y*freq)*amp; amp*=0.52; freq*=2.13; }
+  return total; }
+function makeNormalMapFromHeight(size,heightFn,strength){
+  const hh=new Float32Array(size*size);
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++)hh[y*size+x]=heightFn(x,y);
+  const cv=cnv(size), cx2=cv.getContext('2d'), img=cx2.createImageData(size,size);
+  for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+    const xm=Math.max(0,x-1),xp=Math.min(size-1,x+1),ym=Math.max(0,y-1),yp=Math.min(size-1,y+1);
+    const dx=(hh[y*size+xp]-hh[y*size+xm])*strength, dy=(hh[yp*size+x]-hh[ym*size+x])*strength;
+    let nx=-dx,ny=-dy,nz=1; const len=Math.hypot(nx,ny,nz); nx/=len;ny/=len;nz/=len;
+    const i=(y*size+x)*4;
+    img.data[i]=(nx*0.5+0.5)*255; img.data[i+1]=(ny*0.5+0.5)*255; img.data[i+2]=(nz*0.5+0.5)*255; img.data[i+3]=255; }
+  cx2.putImageData(img,0,0);
+  const tex=new THREE.CanvasTexture(cv); return tex; }
+const waterNmap=makeNormalMapFromHeight(512,(x,y)=>fbm2i(x/512*40,y/512*40,5),1.6);
+waterNmap.anisotropy=renderer.capabilities.getMaxAnisotropy();
+waterNmap.wrapS=waterNmap.wrapT=THREE.RepeatWrapping;
+const foamTex=(()=>{ const R=256, cv=cnv(R), c2=cv.getContext('2d'), img=c2.createImageData(R,R);
+  for(let j=0;j<R;j++)for(let i=0;i<R;i++){
+    const u=i/R*6.28, v=j/R*6.28;   // шум по «тору» — на повторе швов нет
+    const n=fbm2i(3.5+3.2*Math.cos(u),3.5+3.2*Math.sin(u)+2.1*Math.sin(v),3)*0.5
+           +fbm2i(9.1+2.6*Math.cos(v),4.7+2.6*Math.sin(v)+1.7*Math.cos(u),3)*0.5;
+    const g=Math.max(0,Math.min(255,Math.round(n*255)));
+    img.data[(j*R+i)*4]=g; img.data[(j*R+i)*4+3]=255; }
+  c2.putImageData(img,0,0);
+  const t=new THREE.CanvasTexture(cv); t.colorSpace=THREE.NoColorSpace;
+  t.wrapS=t.wrapT=THREE.RepeatWrapping; return t; })();
+// карта глубин: R = (урез − дно)/6, один раз из heightAt (с руслами рек)
+const WLVL=-0.5, DTW=384, DTH=224, DZPAD=26, dZ0=MINZ-DZPAD, dZH=(MAXZ-MINZ)+2*DZPAD;
+const depthTex=(()=>{ const a=new Float32Array(DTW*DTH), t0=performance.now();
+  for(let j=0;j<DTH;j++)for(let i=0;i<DTW;i++){
+    const x=WX0+(i+0.5)/DTW*WX, z=dZ0+(j+0.5)/DTH*dZH;
+    a[j*DTW+i]=Math.max(0,Math.min(1,(WLVL-heightAt(x,z))/6)); }   // С реками: гладь затекает в русла (вода в реках); «без рек» осушало все русла — откат 07.10
+  { // сглаживание «прямоугольных срезов» (скрин 07.10): щербины заполняем средним 3×3,
+    // ВОДУ НЕ СЪЕДАЕМ (max со своим значением — узкие русла не мелеют и не сохнут)
+    const b=new Float32Array(DTW*DTH);
+    for(let j=0;j<DTH;j++)for(let i=0;i<DTW;i++){
+      let s=0,n=0;
+      for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){
+        const jj=j+dj, ii=(i+di+DTW)%DTW;              // по X мир кольцом
+        if(jj<0||jj>=DTH)continue; s+=a[jj*DTW+ii]; n++; }
+      b[j*DTW+i]=Math.max(a[j*DTW+i], s/n*0.92); }
+    a.set(b); }
+  console.log('depthTex '+(performance.now()-t0).toFixed(0)+'ms');
+  // HalfFloat, НЕ Float: линейная фильтрация float-текстур в Safari/WebKit не гарантирована —
+  // карта читалась «квадратами» (прямоугольные кромки) и роняла узкие русла в сушу (мель у Артёма,
+  // на SwiftShader-стенде не воспроизводилось: там float-linear есть)
+  const ha=new Uint16Array(DTW*DTH);
+  for(let i=0;i<a.length;i++)ha[i]=THREE.DataUtils.toHalfFloat(a[i]);
+  const t=new THREE.DataTexture(ha,DTW,DTH,THREE.RedFormat,THREE.HalfFloatType);
+  t.minFilter=t.magFilter=THREE.LinearFilter; t.generateMipmaps=false;
+  t.wrapS=THREE.RepeatWrapping; t.wrapT=THREE.ClampToEdgeWrapping; t.needsUpdate=true; return t; })();
+const waterUniforms={uLabT:{value:0}};
+const waterMat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.22,metalness:0.32,
+  transparent:true,opacity:0.9,normalMap:waterNmap,normalScale:new THREE.Vector2(1.0,1.0)});  // 08.10: рябь возвращена по «верни рябь» (приглушение было моим решением — отменено)
+waterMat.onBeforeCompile=(sh)=>{
+  sh.uniforms.uDepthTex={value:depthTex};
+  sh.uniforms.uFoamTex={value:foamTex};
+  sh.uniforms.uLabT=waterUniforms.uLabT;
+  sh.uniforms.uWX0={value:WX0}; sh.uniforms.uWXW={value:WX};
+  sh.uniforms.uZ0={value:dZ0}; sh.uniforms.uZH={value:dZH};
+  sh.vertexShader=sh.vertexShader
+    .replace('#include <begin_vertex>','#include <begin_vertex>\n vLabWPos=(modelMatrix*vec4(transformed,1.0)).xz;')
+    .replace('void main() {','varying vec2 vLabWPos;\nvoid main() {');
+  sh.fragmentShader=sh.fragmentShader
+    .replace('void main() {',
+`uniform sampler2D uDepthTex; uniform sampler2D uFoamTex; uniform float uLabT;
+uniform float uWX0; uniform float uWXW; uniform float uZ0; uniform float uZH;
+varying vec2 vLabWPos;
+void main() {`)
+    .replace('#include <map_fragment>',
+`#include <map_fragment>
+{
+  vec2 wp=vLabWPos;
+  wp.x=uWX0+mod(wp.x-uWX0,uWXW);                              // кольцо: клоны листа читают карту как оригинал
+  vec2 duv=vec2((wp.x-uWX0)/uWXW, clamp((wp.y-uZ0)/uZH,0.0,1.0));
+  // рваная кромка вместо «прямоугольных срезов» грубой карты: семпл с мировым шумом ±~1 м
+  vec2 jit=vec2(sin(wp.x*2.3+wp.y*5.1)+0.6*sin(wp.x*7.7-wp.y*3.3),
+                sin(wp.y*2.9-wp.x*4.7)+0.6*sin(wp.y*8.3+wp.x*2.1));
+  float dpt0=texture2D(uDepthTex,duv).r;
+  float dptJ=texture2D(uDepthTex,duv+jit*vec2(0.6/384.0,0.6/224.0)).r;
+  float dpt=mix(dptJ,dpt0,smoothstep(0.002,0.012,dpt0));      // рваная только САМАЯ кромка; мелкие протоки и глубина — прямой семпл (дизер 1.1px решетил их дырами)
+  if(dpt<0.0005) discard;                                     // на суше гладь не рисуем
+  if(wp.y<uZ0+26.0||wp.y>uZ0+uZH-26.0) discard;   // 08.10: цив-край — карта обрезается РОВНО (скрин цивы: прямой срез, за ним фон, не море)
+  float dptC=max(dpt,0.28);                                   // «ЕДИНЫЙ ТОН»: цвет не мельче среднего
+  vec3 shallowC=vec3(0.125,0.29,0.44);  // 08.10 «вату затемнить», шаг 2: ещё −12% (первый шаг глаз не заметил)
+  vec3 midC    =vec3(0.115,0.28,0.47);
+  vec3 deepC   =vec3(0.095,0.25,0.43);
+  vec3 wcol=mix(shallowC, midC, smoothstep(0.04,0.28,dptC));
+  wcol=mix(wcol, deepC, smoothstep(0.30,1.05,dptC));
+  diffuseColor.rgb=wcol;
+  diffuseColor.a=mix(0.93,0.97,smoothstep(0.0,0.4,dptC));  // 09.10: у кромки вода плотнее — светлое дно не светит
+  diffuseColor.a*=smoothstep(0.0003,0.006,dpt);               // мягкий край ужат
+  float breathe=0.012*sin(uLabT*0.9+wp.x*0.8+wp.y*0.6);
+  float band=1.0-smoothstep(0.004,0.022+breathe*0.5,dpt);     // узкая полоса пены у уреза
+  float fn=texture2D(uFoamTex, wp*0.16+vec2(uLabT*0.014,-uLabT*0.011)).r;
+  float foam=band*smoothstep(0.60,0.85,fn)*0.2;   // 09.10: молочную полосу гасим
+  foam+=0.08*band*(1.0-smoothstep(0.0,0.025,dpt));
+  foam=clamp(foam,0.0,1.0);
+  diffuseColor.rgb=mix(diffuseColor.rgb, vec3(0.93,0.96,0.95), foam);
+  diffuseColor.a=max(diffuseColor.a, foam*0.9);
+}`)
+    .replace('#include <normal_fragment_maps>',
+`normal=vec3(0.0, normal.y>=0.0?1.0:-1.0, 0.0);   // гладь всегда плоская (изломы ловили свет полосами)
+{
+  vec2 wuv=vLabWPos/112.0;                        // масштаб ряби старого мира size=2 (тайл 112 м) — 1-в-1
+  mat3 tbn=getTangentFrame(-vViewPosition, normal, wuv);
+  vec3 n1=texture2D(normalMap, wuv+vec2(uLabT*0.006,uLabT*0.004)).xyz*2.0-1.0;
+  vec3 n2=texture2D(normalMap, wuv*1.9-vec2(uLabT*0.005,-uLabT*0.007)).xyz*2.0-1.0;
+  vec3 mapN=normalize(mix(n1,n2,0.5));
+  mapN.xy*=normalScale;
+  normal=normalize(tbn*mapN);
+}`);
+  window.__oldWater=true;   // контроль: шейдер воды реально пропатчен
+};
+const waterMesh=new THREE.Mesh(new THREE.PlaneGeometry(1500,1500), waterMat);
+waterMesh.rotation.x=-Math.PI/2;
+waterMesh.position.set(0,-0.62,0);  // как в loop: чуть ниже уреза −0.5 — кромка глади прячется под крашеной отмелью
+scene.add(waterMesh);
+{ // 08.10: цив-льдины у кромки мира (скрин цивы 21:10) — белые плиты на воде двух крайних рядов, одним InstancedMesh
+  const polar=CENTERS.filter(c=>c.type==='water'&&(c.row<2||c.row>=ROWS-2));
+  const slots=[];
+  for(const c of polar){ const n=3+Math.floor(h2d(c.col*5+1,c.row*9+2)*4);
+    for(let i=0;i<n;i++){ const a=h2d(c.col*13+i,c.row*7+i*3)*Math.PI*2, r0=h2d(c.col*17+i*5,c.row*11+i)*HEXR*0.85;
+      slots.push([c.x+Math.cos(a)*r0, c.z+Math.sin(a)*r0, h2d(c.col+i*7,c.row+i*13)]); } }
+  if(slots.length){
+    // 08.10 «льдины-коробки — отстой»: неровные многоугольные ПЛИТЫ (3 прототипа, рваный контур),
+    // крупные редкие + мелкая шуга; торцы затеняет сам свет
+    const protos=[];
+    for(let p=0;p<3;p++){ const sh=new THREE.Shape(); const nv=7+p;
+      for(let k=0;k<nv;k++){ const a=k/nv*Math.PI*2, r0=0.55+h2d(p*31+k,k*7+p)*0.5;
+        const px=Math.cos(a)*r0, py=Math.sin(a)*r0;
+        k?sh.lineTo(px,py):sh.moveTo(px,py); }
+      sh.closePath();
+      const eg=new THREE.ExtrudeGeometry(sh,{depth:0.22,bevelEnabled:true,bevelThickness:0.05,bevelSize:0.07,bevelSegments:1});
+      eg.rotateX(-Math.PI/2); protos.push(eg); }
+    const m=new THREE.MeshStandardMaterial({color:0xf0f5f8,roughness:0.88});
+    const M4=new THREE.Matrix4(), q=new THREE.Quaternion(), e=new THREE.Euler(), p3=new THREE.Vector3(), s3=new THREE.Vector3();
+    const byP=[[],[],[]];
+    slots.forEach((s,i)=>byP[i%3].push([s,i]));
+    byP.forEach((list,p)=>{ if(!list.length)return;
+      const im=new THREE.InstancedMesh(protos[p],m,list.length);
+      list.forEach(([s,gi],i)=>{ const big=s[2]>0.82;                     // ~18% крупных плит
+        const sc=big?2.6+s[2]*3.0:0.7+s[2]*1.6;                           // остальное — шуга 0.7..2 м
+        e.set((s[2]-0.5)*0.1, h2d(gi,9)*Math.PI*2, (h2d(gi,3)-0.5)*0.1); q.setFromEuler(e);
+        s3.set(sc*(0.75+h2d(gi,5)*0.5), 1, sc); p3.set(s[0],-0.56,s[1]);
+        M4.compose(p3,q,s3); im.setMatrixAt(i,M4); });
+      im.castShadow=true; scene.add(im); }); }
+  window.__nFloe=slots.length; }
+addEventListener('keydown',e=>{ if(e.key==='g'&&terU){
+  terU.uGrid.value=terU.uGrid.value>0.5?0:(terU.uGrid.value>0?1:0.45); }});
+
+// брёвнышко с торцами
+// ================= БИБЛИОТЕКА ТАЙЛОВ (декор по рельефу) =================
+let CLR=null;                                     // 15.10: {x,z,r} — поляна под здание промысла (decTick ставит на время сборки клетки)
+function scatterOnHex(g,n,fn,rMax=HEXR*0.72,cx=0,cz=0){
+  for(let i=0;i<n;i++){
+    const a=R()*Math.PI*2, d=Math.sqrt(R())*rMax;
+    const lx=Math.cos(a)*d, lz=Math.sin(a)*d;
+    const y=heightAt(cx+lx,cz+lz);
+    if(y<-0.32||(RV>0&&riverT(cx+lx,cz+lz)>0.2)||TRAILS.near(cx+lx,cz+lz,1.4))continue;  // в воду/русло/нарисованную реку и на тропу не ставим
+    if(CLR&&Math.hypot(cx+lx-CLR.x,cz+lz-CLR.z)<CLR.r)continue;                          // 15.10: поляна под здание промысла
+    const o=fn(i);o.position.set(lx,y-0.03,lz);
+    o.rotation.y=R()*Math.PI*2;g.add(o);}
+}
+// объёмные пучки травы (возвращают «пучковость» цив-масштаба)
+const tuftGeo=(()=>{ const g1=new THREE.PlaneGeometry(0.34,0.26); g1.translate(0,0.12,0);
+  const g2=g1.clone(); g2.rotateY(Math.PI/2);
+  const g=new THREE.BufferGeometry(); const ps=[],us=[];
+  for(const gg of [g1,g2]){ const n=gg.toNonIndexed();
+    ps.push(...n.attributes.position.array); us.push(...n.attributes.uv.array); }
+  g.setAttribute('position',new THREE.Float32BufferAttribute(ps,3));
+  g.setAttribute('uv',new THREE.Float32BufferAttribute(us,2));
+  g.computeVertexNormals(); return g; })();
+const tuftTex=(()=>{ const c=cnv(64); const g=c.getContext('2d');
+  const L=(s=>()=> (s=(s*1103515245+12345)>>>0)/4294967296)(41);
+  for(let i=0;i<12;i++){ const x=8+L()*48;   // травинки толще и светлее: тонкие в мипах чернели
+    g.strokeStyle=`hsl(${72+L()*30} ${40+L()*22}% ${36+L()*24}%)`;
+    g.lineWidth=2.2+L()*2; g.beginPath(); g.moveTo(x,64);
+    g.quadraticCurveTo(x+(L()-0.5)*12,32,x+(L()-0.5)*20,5+L()*12); g.stroke(); }
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t; })();
+const tuftMat=new THREE.MeshStandardMaterial({map:tuftTex,alphaTest:0.35,side:THREE.DoubleSide,roughness:1});
+function addTufts(g,n,cx,cz,dryK=0,o=null){
+  const im=new THREE.InstancedMesh(tuftGeo,tuftMat,n);
+  const Mx=new THREE.Matrix4(),Q=new THREE.Quaternion(),E=new THREE.Euler(),C=new THREE.Color();
+  let put=0;
+  for(let i=0;i<n;i++){
+    const a=R()*Math.PI*2, d=Math.sqrt(R())*HEXR*0.86;
+    const lx=Math.cos(a)*d, lz=Math.sin(a)*d;
+    const ty2=heightAt(cx+lx,cz+lz); if(ty2<-0.32||(RV>0&&riverT(cx+lx,cz+lz)>0.2)||TRAILS.near(cx+lx,cz+lz,0.35))continue;
+    E.set(0,R()*Math.PI,0); Q.setFromEuler(E);
+    Mx.compose(new THREE.Vector3(lx,ty2+0.02,lz),Q,
+      new THREE.Vector3(rr(0.7,1.4),o?rr(o.h[0],o.h[1]):rr(0.6,1.4),1));
+    im.setMatrixAt(put,Mx);
+    if(o)C.setHSL(o.hsl[0]+rr(-0.015,0.015),o.hsl[1]+rr(-0.05,0.05),o.hsl[2]+rr(-0.06,0.04),THREE.SRGBColorSpace); else C.setHSL(0.22+rr(-0.03,0.03)-dryK*0.115,rr(0.35,0.55)+dryK*0.1,rr(0.44,0.6)+dryK*0.09,THREE.SRGBColorSpace);
+    im.setColorAt(put,C); put++; }
+  im.count=put; g.add(im);
+}
+// цветы: крохотные цветные точки-билборды по лугу
+const flowerTex=(()=>{ const c=cnv(32); const g=c.getContext('2d');g.clearRect(0,0,32,32);
+  for(let i=0;i<5;i++){const a=i/5*Math.PI*2;
+    g.fillStyle='#fff';g.beginPath();g.ellipse(16+Math.cos(a)*7,16+Math.sin(a)*7,5,5,0,0,7);g.fill();}
+  g.fillStyle='#e9c53a';g.beginPath();g.arc(16,16,5,0,7);g.fill();
+  const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t; })();
+const flowerMat=new THREE.MeshStandardMaterial({map:flowerTex,alphaTest:0.4,side:THREE.DoubleSide,roughness:1});
+function addFlowers(g,n,cx,cz){
+  const im=new THREE.InstancedMesh(new THREE.PlaneGeometry(0.17,0.17),flowerMat,n);
+  const Mx=new THREE.Matrix4(),Q=new THREE.Quaternion(),E=new THREE.Euler(),C=new THREE.Color();
+  const cols=[0xffffff,0xe8dff0,0xf2e6b0,0xead0e0];
+  let put=0;
+  for(let i=0;i<n;i++){
+    const a=R()*Math.PI*2, d=Math.sqrt(R())*HEXR*0.8;
+    const lx=Math.cos(a)*d, lz=Math.sin(a)*d;
+    const ty2=heightAt(cx+lx,cz+lz); if(ty2<-0.32||(RV>0&&riverT(cx+lx,cz+lz)>0.2)||TRAILS.near(cx+lx,cz+lz,0.35))continue;
+    E.set(rr(-1.45,-1.2),R()*Math.PI,0); Q.setFromEuler(E);
+    Mx.compose(new THREE.Vector3(lx,ty2+0.06,lz),Q,
+      new THREE.Vector3(1,1,1));
+    im.setMatrixAt(put,Mx);
+    C.set(cols[Math.floor(R()*cols.length)]);
+    im.setColorAt(put,C); put++; }
+  im.count=put; g.add(im);
+}
+const TILES={
+  meadow(cx,cz){ const g=new THREE.Group();
+    scatterOnHex(g,1,()=>mkRock(rr(0.18,0.28)),HEXR*0.72,cx,cz);
+    if(R()<0.6) scatterOnHex(g,1,()=>mkTree(rr(0.41,0.53)),HEXR*0.72,cx,cz);
+    addTufts(g,26,cx,cz); addFlowers(g,11,cx,cz);
+    return g; },
+  dry(cx,cz){ const g=new THREE.Group();
+    scatterOnHex(g,1,()=>mkRock(rr(0.2,0.3)),HEXR*0.72,cx,cz);
+    addTufts(g,20,cx,cz,1);
+    addTufts(g,30,cx,cz,0,{h:[1.8,2.8],hsl:[0.12,0.22,0.74]});   // 17.10 степь B: пучки ковыля; 21.10 проба Б — гуще и выше
+    return g; },
+  forest(cx,cz){ const g=new THREE.Group();  // роща: сплошной ковёр, как в циве
+    const south=Math.abs(cz)<MAXZ*0.38;
+    scatterOnHex(g,south?22:26,()=>mkTree(rr(0.45,0.9)),HEXR*0.78,cx,cz);   // гуще (вердикт 04.10)
+    scatterOnHex(g,south?4:9,()=>mkPine(rr(0.6,0.98)),HEXR*0.8,cx,cz);
+    if(south)scatterOnHex(g,5,()=>mkSPine(rr(0.85,1.2)),HEXR*0.75,cx,cz);
+    scatterOnHex(g,2,()=>mkRock(rr(0.2,0.35)),HEXR*0.7,cx,cz);
+    return g; },
+  pines(cx,cz){ const g=new THREE.Group();
+    scatterOnHex(g,24,()=>mkPine(rr(0.5,1.05)),HEXR*0.78,cx,cz);   // гуще (вердикт 04.10)
+    scatterOnHex(g,2,()=>mkRock(rr(0.25,0.4)),HEXR*0.7,cx,cz);
+    return g; },
+  hills(cx,cz){ const g=new THREE.Group();   // бугры теперь в самом рельефе
+    if(HLV.includes('3')){                       // 16.10 ?hl=3: каменные выходы гнёздами + кусты
+      for(let k=0;k<3;k++){ const a=R()*7, d=Math.sqrt(R())*HEXR*0.6, x=cx+Math.cos(a)*d, z=cz+Math.sin(a)*d;
+        scatterOnHex(g,3+Math.floor(R()*2),()=>mkRock(rr(0.35,0.65)),HEXR*0.16,x,z); }
+      scatterOnHex(g,5,()=>mkTree(rr(0.26,0.34)),HEXR*0.7,cx,cz); }
+    scatterOnHex(g,2,()=>mkRock(rr(0.22,0.35)),HEXR*0.72,cx,cz);
+    if(R()<0.7)scatterOnHex(g,1,()=>mkTree(0.45),HEXR*0.6,cx,cz);
+    addTufts(g,22,cx,cz);
+    return g; },
+  mountain(){ return null; },                   // гора — объект-меш (MNT); обломки убраны: читались «прыщами»
+  desert(cx,cz){ const g=new THREE.Group();
+    scatterOnHex(g,2,()=>mkRock(rr(0.3,0.55)),HEXR*0.72,cx,cz);
+    addTufts(g,6,cx,cz,1);                       // редкая выгоревшая поросль
+    return g; },
+  snow(cx,cz){ const g=new THREE.Group();
+    scatterOnHex(g,1,()=>{const rk=mkRock(rr(0.22,0.33));
+      rk.material=new THREE.MeshStandardMaterial({color:0xd9dde2,roughness:0.95}); return rk;},HEXR*0.7,cx,cz);
+    if(R()<0.7)scatterOnHex(g,2,()=>mkPine(rr(0.53,0.75)),HEXR*0.65,cx,cz);
+    return g; },
+  water(){ return null; },                    // впадина рельефа + общая гладь
+  tundra(cx,cz){ const g=new THREE.Group();
+    scatterOnHex(g,3,()=>{const rk=mkRock(rr(0.25,0.5));
+      rk.material=new THREE.MeshStandardMaterial({color:0x9aa0a2,roughness:1});return rk;},HEXR*0.72,cx,cz);
+    if(R()<0.8)scatterOnHex(g,2,()=>mkPine(rr(0.3,0.45)),HEXR*0.66,cx,cz);  // карликовые ёлочки
+    addTufts(g,10,cx,cz,0.5);
+    return g; },
+  marsh(cx,cz){ const g=new THREE.Group();
+    addReeds(g,34,cx,cz);
+    scatterOnHex(g,3,()=>mkSnag(rr(0.7,1.1)),HEXR*0.62,cx,cz);   // коряги
+    for(let i=0;i<6;i++){ // кочки над жижей
+      const a=R()*Math.PI*2, d=Math.sqrt(R())*HEXR*0.7;
+      const lx=Math.cos(a)*d, lz=Math.sin(a)*d;
+      const y=heightAt(cx+lx,cz+lz); if(y<-0.42||y>0.05)continue;
+      const k2=new THREE.Mesh(new THREE.SphereGeometry(rr(0.16,0.3),8,6),
+        new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(0.24,0.35,0.2,THREE.SRGBColorSpace),roughness:1}));
+      k2.scale.y=0.42;k2.position.set(lx,y+0.03,lz);k2.castShadow=true;g.add(k2);}
+    addTufts(g,12,cx,cz);
+    return g; },
+  jungle(cx,cz){ const g=new THREE.Group();   // сомкнутый полог широколиственных
+    scatterOnHex(g,25,()=>mkTree(rr(0.6,1.05)),HEXR*0.78,cx,cz);   // гуще (вердикт 04.10)
+    for(let i=0;i<3;i++){ // пальмы только на кромке, у воды
+      const a=R()*Math.PI*2;
+      const lx=Math.cos(a)*HEXR*rr(0.82,0.95), lz=Math.sin(a)*HEXR*rr(0.82,0.95);
+      const y=heightAt(cx+lx,cz+lz);
+      if(y<-0.32||y>0.35||(RV>0&&riverT(cx+lx,cz+lz)>0.2))continue; // кромка = низко у воды
+      const p=mkPalm(rr(0.9,1.25));p.position.set(lx,y-0.03,lz);
+      p.rotation.y=R()*Math.PI*2;g.add(p);}
+    addTufts(g,24,cx,cz);                     // густой тёмный подлесок
+    return g; },
+  savanna(cx,cz){ const g=new THREE.Group();
+    scatterOnHex(g,4,()=>mkAcacia(rr(1.5,2.1)),HEXR*0.7,cx,cz);   // 23.10: акации крупнее (зонт виден и с отлёта) — маркер саванны
+    scatterOnHex(g,2,()=>mkRock(rr(0.25,0.4)),HEXR*0.7,cx,cz);
+    addTufts(g,16,cx,cz,1);
+    return g; },
+  village(cx,cz,c){ return mkSettle(cx,cz,c||{}); },   // 15.10: вид по ступени поселения (блок СТУПЕНИ ниже)
+  field(cx,cz){ const g=new THREE.Group();   // борозды рисует сплат, тут только снопы
+    const hF=flatHeight({x:cx,z:cz,type:'field'});
+    g.position.y=hF;
+    for(let i=0;i<4;i++){ const a=R()*Math.PI*2, d=Math.sqrt(R())*HEXR*0.6;
+      const lx=Math.cos(a)*d, lz=Math.sin(a)*d;
+      if(heightAt(cx+lx,cz+lz)<hF-0.25)continue;     // река врезала край — сноп не висит
+      const sh=mkSheaf();sh.scale.setScalar(0.68);   // сноп ~0.4 м, не треть хаты
+      sh.position.set(lx,0,lz);
+      sh.rotation.y=R()*Math.PI*2;g.add(sh);}
+    g.userData.flat=true;
+    return g; },
+};
+
+// ================= ДЕКОР: ОКНО полного полигонного декора + ДАЛЬНИЙ ЛЕС ИНСТАНСАМИ =================
+// запекатель: любая полигонная Group → слитые геометрии по текстурам, цвета материалов/инстансов — в вершины
+function colorizeGeo(g,col){ const n=g.attributes.position.count, arr=new Float32Array(n*3);
+  for(let i=0;i<n;i++){arr[i*3]=col.r;arr[i*3+1]=col.g;arr[i*3+2]=col.b;}
+  g.setAttribute('color',new THREE.BufferAttribute(arr,3)); return g; }
+function mergeGeos(gs){
+  let nv=0; for(const g of gs)nv+=g.attributes.position.count;
+  const out=new THREE.BufferGeometry();
+  for(const name of ['position','normal','uv','color']){
+    if(!gs[0].attributes[name])continue;
+    const sz=gs[0].attributes[name].itemSize, arr=new Float32Array(nv*sz); let o=0;
+    for(const g of gs){ const a=g.attributes[name];
+      if(a)arr.set(a.array,o); o+=g.attributes.position.count*sz; }
+    out.setAttribute(name,new THREE.BufferAttribute(arr,sz)); }
+  return out; }
+function bakeGroup(root,leafKeep=1,leafScale=1,keyFn=null){ // leafKeep: прореживание инстанс-листвы для дали
+  root.updateMatrixWorld(true);
+  const bk=new Map(), bkMap=new Map(), _m=new THREE.Matrix4(), _c=new THREE.Color();
+  const add=(g,mat,col,keepCol,tint)=>{
+    if(keepCol){ const a=g.attributes.color.array;          // тона crumple × цвет листвы × джиттер дерева
+      const tr2=col.r*(tint?tint[0]:1), tg=col.g*(tint?tint[1]:1), tb=col.b*(tint?tint[2]:1);
+      for(let i=0;i<a.length;i+=3){ a[i]*=tr2; a[i+1]*=tg; a[i+2]*=tb; } }
+    else colorizeGeo(g,col);
+    const k=keyFn?keyFn(mat):(mat.map||0);
+    if(!bk.has(k)){bk.set(k,[]);bkMap.set(k,mat.map||null);} bk.get(k).push(g); };
+  root.traverse(o=>{
+    if(o.isInstancedMesh){
+      const base=o.geometry.index?o.geometry.toNonIndexed():o.geometry;
+      for(let i=0;i<o.count;i+=leafKeep){
+        o.getMatrixAt(i,_m);
+        const g=base.clone(); g.scale(leafScale,leafScale,leafScale);
+        g.applyMatrix4(_m).applyMatrix4(o.matrixWorld);
+        if(o.instanceColor)_c.fromArray(o.instanceColor.array,i*3); else _c.copy(o.material.color);
+        add(g,o.material,_c); }
+    } else if(o.isMesh){
+      const g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone();
+      g.applyMatrix4(o.matrixWorld);
+      add(g,o.material,o.material.color,!!o.geometry.attributes.color,o.userData.tint); } });
+  const out=[]; for(const [k,gs] of bk)out.push({geo:mergeGeos(gs),map:bkMap.get(k),key:k});
+  return out; }
+const bakedMats=new Map();
+function bakedMat(key,map){ if(bakedMats.has(key))return bakedMats.get(key);
+  let m;
+  if(key==='tuft'){ m=tuftMat.clone(); m.vertexColors=true; }
+  else if(key==='flw'){ m=flowerMat.clone(); m.vertexColors=true; }
+  else m=farMat(map);
+  bakedMats.set(key,m); return m; }
+const farMats=new Map();
+function farMat(map){ if(farMats.has(map))return farMats.get(map);
+  const m=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.96});
+  if(map){ m.map=map;
+    if(map===leafMottleTexB)m.flatShading=true;                       // гранёные кроны старого движка
+    else if(map!==leafT){m.alphaTest=0.3;m.side=THREE.DoubleSide;} }
+  farMats.set(map,m); return m; }
+// дальний лес: силуэты из НАСТОЯЩИХ mkTree/mkPine (листва прорежена 1/5 и укрупнена — вид тот же с 60+ м)
+const farReg=new Map(), FAR_A=[], FAR_B=[];
+{
+  const TVN=4,PVN=3,SPN=2, protos=[];
+  for(let i=0;i<TVN;i++)protos.push(bakeGroup(mkTree(1),4,2.5));
+  { const aut=bakeGroup(mkTree(1),4,2.5);          // осенний вариант: листва целиком в рыжину
+    for(const b of aut){ if(!b.map||b.map===leafT)continue;
+      const col=b.geo.attributes.color;
+      for(let i=0;i<col.count;i++){ const r=col.getX(i),g=col.getY(i),bl=col.getZ(i);
+        col.setXYZ(i,Math.min(1,r*1.5+0.08),g*0.62,bl*0.25); } }
+    protos.push(aut); }
+  for(let i=0;i<PVN;i++)protos.push(bakeGroup(mkPine(1)));
+  for(let i=0;i<SPN;i++)protos.push(bakeGroup(mkSPine(1)));
+  const lists=protos.map(()=>[]);
+  const pick=k=>k===1?TVN+1+Math.floor(R()*PVN)
+    :k===2?TVN+1+PVN+Math.floor(R()*SPN)
+    :(R()<0.18?TVN:Math.floor(R()*TVN));           // ~18% лиственных — целиком осенние
+  for(const c of CENTERS){
+    let nT=0,nP=0,nS=0,s0=0.5,s1=0.9;
+    const south=Math.abs(c.z)<MAXZ*0.38;
+    if(c.type==='forest'){nT=south?10:13;nP=south?2:4;nS=south?4:0;s0=0.55;s1=1.0;}
+    else if(c.type==='jungle'){nT=14;s0=0.7;s1=1.15;}
+    else if(c.type==='pines'){nP=12;s0=0.6;s1=1.15;}
+    else if(c.type==='snow'){if(R()<0.7)nP=2;s0=0.53;s1=0.75;}
+    else if(c.type==='tundra'){if(R()<0.8)nP=2;s0=0.3;s1=0.45;}
+    else continue;                               // meadow/hills издали чистые: одиночки читались «прыщами»
+    const key=c.col+','+c.row;
+    for(let i=0;i<nT+nP+nS;i++){
+      const kind=i<nT?0:(i<nT+nP?1:2);
+      const a=R()*Math.PI*2, dd=Math.sqrt(R())*HEXR*0.78;
+      const x=c.x+Math.cos(a)*dd, z=c.z+Math.sin(a)*dd;
+      const y=heightAt(x,z); if(y<-0.3||(RV>0&&riverT(x,z)>0.25)||TRAILS.near(x,z,1.4))continue;
+      const sc=rr(s0,s1)*(kind===2?1.1:1);
+      const m=new THREE.Matrix4().compose(new THREE.Vector3(x,y-0.02,z),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),R()*Math.PI*2),
+        new THREE.Vector3(sc,sc*rr(0.9,1.15),sc));
+      lists[pick(kind)].push({m,key}); } }
+  for(let v=0;v<protos.length;v++){
+    const L=lists[v]; if(!L.length)continue;
+    for(const {geo,map} of protos[v]){
+      const im=new THREE.InstancedMesh(geo,farMat(map),L.length);
+      for(let i=0;i<L.length;i++)im.setMatrixAt(i,L[i].m);
+      im.frustumCulled=false; scene.add(im); FAR_A.push(im);
+      const im2=new THREE.InstancedMesh(geo,im.material,L.length);
+      im2.instanceMatrix=im.instanceMatrix;           // общий буфер: гашение видно на обоих листах кольца
+      im2.frustumCulled=false; scene.add(im2); FAR_B.push(im2);
+      for(let i=0;i<L.length;i++){
+        if(!farReg.has(L[i].key))farReg.set(L[i].key,[]);
+        farReg.get(L[i].key).push({att:im.instanceMatrix,i,m:L[i].m,im}); } } }
+}
+// ================= ГОРЫ v10: ГЕНЕРАТОР ИЗ ЛАБОРАТОРИИ (пресет Артёма 03.10) =================
+// Каждая гора уникальна: сид от (col,row), параметры = пресет ± разброс vary. Кластеры соседних
+// горных гексов слиты в ОДИН рельеф: сёдла-перемычки между вершинами (хребет перетекает).
+// Снег — по гладкому радиусу от вершины dBest (не по высоте: на рёбрах высота волнистая — «косички»).
+const MNT_A=[],MNT_B=[];
+{
+  const MP={height:4.7,sharp:1.6,base:0.73,peaks:3,ribs:2,ribAmp:0.34,rough:0.21,
+            vary:0.49,snowFrac:0.75,snowJag:0.15,rockLight:0.82,footGreen:0.55}; // строка Артёма из mountain-lab
+  const RADL=4.4;
+  const mh=new Map();
+  for(const c of CENTERS)if(c.type==='mountain')mh.set(c.col+','+c.row,c);
+  const nbr=c=>{ const odd=c.row%2,
+    L=odd?[[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,0]]:[[-1,-1],[0,-1],[1,0],[0,1],[-1,1],[-1,0]];
+    const out=[]; for(const [dc,dr] of L){ const n=mh.get((((c.col+dc)%COLS+COLS)%COLS)+','+(c.row+dr)); if(n)out.push(n); } return out; };
+  const used=new Set(), clusters=[];
+  for(const [k,c] of mh){ if(used.has(k))continue;
+    const cl=[c]; used.add(k);
+    for(let i=0;i<cl.length;i++)for(const n of nbr(cl[i])){ const nk=n.col+','+n.row;
+      if(!used.has(nk)){used.add(nk);cl.push(n);} }
+    clusters.push(cl); }
+  let ms=1; const srnd=()=>(ms=(ms*1103515245+12345)>>>0)/4294967296;
+  function mkMnt(c,x0){
+    ms=(c.col*73856093 ^ c.row*19349663 ^ 0x9e3779b9)>>>0; srnd();srnd();
+    const V=MP.vary, vr=a=>1+(srnd()*2-1)*a*V;
+    const cx=x0+wdx(c.x,x0)+(srnd()*2-1)*0.7, cz=c.z+(srnd()*2-1)*0.7; // джиттер: цепь не по линейке
+    const H=MP.height*vr(0.75);                 // высоты СИЛЬНО разные: доминанты и низкие зубья (вердикт 03.10)
+    const sharp=Math.max(0.6,MP.sharp*vr(0.35));
+    const base=MP.base*vr(0.25);
+    const nPk=Math.max(1,Math.min(5,Math.round(MP.peaks+(srnd()*2-1)*V*1.8)));
+    const ribs=Math.max(2,Math.round(MP.ribs+(srnd()*2-1)*V*3));
+    const ribAmp=Math.max(0,MP.ribAmp*vr(0.6));
+    const phi=srnd()*Math.PI*2;
+    const pks=[{x:cx,z:cz,H,s:base}];
+    for(let i=1;i<nPk;i++){ const a=srnd()*Math.PI*2, d=(0.35+srnd()*0.3)*RADL*base;
+      pks.push({x:cx+Math.cos(a)*d,z:cz+Math.sin(a)*d,H:H*(0.5+srnd()*0.3),s:base*(0.6+srnd()*0.3)}); }
+    return {key:c.col+','+c.row,H,sharp,base,ribs,ribAmp,phi,pks,top:pks[0],
+      snowy:H>=4.2};                            // низкой горе шапка не положена — не на всех снег
+  }
+  const rockGs=[[],[]],snowGs=[]; let vTot=0;   // комбо: две породы скалы, цепь целиком одной (сид решает)
+  const cData=[];
+  for(const cl of clusters){
+    const x0=cl[0].x;
+    const tex=((cl[0].col*73856093 ^ cl[0].row*19349663)>>>8)&1;
+    const MTS=cl.map(c=>mkMnt(c,x0));
+    const byKey=new Map(MTS.map(m=>[m.key,m]));
+    const RIDGES=[];
+    for(const c of cl)for(const n of nbr(c)){
+      if(c.col+','+c.row >= n.col+','+n.row)continue;        // пара сёдел один раз
+      const A=byKey.get(c.col+','+c.row), B=byKey.get(n.col+','+n.row); if(!A||!B)continue;
+      RIDGES.push({ax:A.top.x,az:A.top.z,bx:B.top.x,bz:B.top.z,Ha:A.H,Hb:B.H,
+        s:(A.base+B.base)*0.5*0.55,sh:(A.sharp+B.sharp)*0.5,snowy:A.snowy&&B.snowy}); }
+    const fld=(x,z)=>{
+      let h=0,ribv=0,dBest=1e9;
+      for(const m of MTS){ for(const p of m.pks){
+        const th=Math.atan2(z-p.z,x-p.x);
+        const rib=1+m.ribAmp*Math.sin(th*m.ribs+m.phi);
+        const sW=p.s*RADL;
+        const d=Math.hypot((x-p.x)/(sW*rib),(z-p.z)/(sW*rib*0.88));
+        if(m.snowy){ const dp=Math.hypot((x-p.x)/sW,(z-p.z)/(sW*0.88))*(MP.height/p.H);
+          if(dp<dBest)dBest=dp; }
+        const hp=p.H*Math.exp(-1.9*Math.pow(d,m.sharp));
+        if(hp>h){h=hp;ribv=Math.sin(th*m.ribs+m.phi);} } }
+      for(const r of RIDGES){                                 // седло: link=1 из пресета
+        const dx=r.bx-r.ax,dz=r.bz-r.az,L2=dx*dx+dz*dz||1;
+        let t=((x-r.ax)*dx+(z-r.az)*dz)/L2; t=Math.max(0,Math.min(1,t));
+        const Ht=(r.Ha+(r.Hb-r.Ha)*t)*(1-0.2*Math.sin(t*Math.PI))*0.93;  // провал седла 20%: цепь — хребет, не бусы
+        const dP=Math.hypot(x-(r.ax+dx*t),z-(r.az+dz*t))/(r.s*RADL);
+        const hp=Ht*Math.exp(-1.9*Math.pow(dP,r.sh));
+        if(hp>h){h=hp;ribv=0;}
+        if(r.snowy){ const dR=dP*(MP.height/Ht);              // снег ЛЕНТОЙ вдоль оси гребня (вердикт «зонтики»):
+          if(dR<dBest)dBest=dR; } }                           // у высокого гребня лента шире, в низком седле сходит на нет
+      h+=MP.rough*(Math.sin(x*4.8+z*3.9)+Math.sin(x*8.4-z*6.6))*0.5*Math.min(1,h/1.5);
+      return [h,ribv,dBest];
+    };
+    let mnx=1e9,mxx=-1e9,mnz=1e9,mxz=-1e9;
+    for(const m of MTS){ mnx=Math.min(mnx,m.top.x);mxx=Math.max(mxx,m.top.x);
+      mnz=Math.min(mnz,m.top.z);mxz=Math.max(mxz,m.top.z); }
+    const MG=7.2; mnx-=MG;mxx+=MG;mnz-=MG;mxz+=MG;
+    cData.push({fld,mnx,mxx,mnz,mxz,tex});
+  }
+  let area=0; for(const d of cData)area+=(d.mxx-d.mnx)*(d.mxz-d.mnz);
+  const step=Math.max(0.18,Math.sqrt(area/1.1e6));          // бюджет ~1.1 млн вершин на слой — шаг от РЕАЛЬНОЙ площади
+  for(const cd of cData){
+    const {fld,mnx,mxx,mnz,mxz,tex}=cd;
+    const W=mxx-mnx,D=mxz-mnz;
+    const NX=Math.max(8,Math.round(W/step)),NZ=Math.max(8,Math.round(D/step));
+    const GS=2, GX=Math.ceil(W/GS)+2, GZ=Math.ceil(D/GS)+2, GH=new Float32Array(GX*GZ);
+    for(let j=0;j<GZ;j++)for(let i=0;i<GX;i++)GH[j*GX+i]=heightAt(mnx+i*GS,mnz+j*GS,true); // подложка-рельеф решёткой 2 м
+    const grd=(x,z)=>{ let u=(x-mnx)/GS,v=(z-mnz)/GS;
+      u=Math.max(0,Math.min(GX-1.001,u)); v=Math.max(0,Math.min(GZ-1.001,v));
+      const i=Math.floor(u),j=Math.floor(v),fu=u-i,fv=v-j,b=j*GX+i;
+      return (GH[b]*(1-fu)+GH[b+1]*fu)*(1-fv)+(GH[b+GX]*(1-fu)+GH[b+GX+1]*fu)*fv; };
+    const mkG=(snow)=>{
+      const g=new THREE.PlaneGeometry(W,D,NX,NZ); g.rotateX(-Math.PI/2);
+      g.translate(mnx+W/2,0,mnz+D/2);
+      const pos=g.attributes.position, uv=g.attributes.uv, cols=[];
+      for(let i=0;i<pos.count;i++){
+        const x=pos.getX(i), z=pos.getZ(i);
+        const f=fld(x,z);
+        const dip=(1-Math.min(1,f[0]/0.5))*1.3;   // подол ковра НЫРЯЕТ под рельеф (красные круги 04-05.10)
+        let y=f[0]+grd(x,z)-0.3-dip;
+        if(snow){ const jag=Math.sin(x*4.8+z*3.9)*0.5+Math.sin(x*2+z*2.9)*0.5;
+          const dS=(1-MP.snowFrac)*2.4*Math.max(0.15,1+MP.snowJag*jag*3);
+          y=(f[2]<dS&&f[0]>1.0)?y+0.06:y-0.45; }
+        pos.setY(i,y);
+        uv.setXY(i,x/12,z/12);                 // период рисунка ~5.5 м: с игровой высоты видны плиты, 1-метровый стирался мипами
+        if(snow)cols.push(1,1,1);
+        else { const k=MP.rockLight*(0.68+0.32*Math.max(0,f[1]));
+          let r=k,g2=k*0.95,b2=k*0.88;
+          if(f[0]<1.3){ const t=Math.min(1,(1.3-f[0])/1.3)*MP.footGreen;
+            r*=1-0.4*t; g2*=1+0.3*t; b2*=1-0.55*t; }
+          cols.push(r,g2,b2); } }
+      g.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));
+      g.computeVertexNormals(); return g; };
+    rockGs[tex].push(mkG(false)); snowGs.push(mkG(true)); vTot+=(NX+1)*(NZ+1);
+  }
+  const rockMats=['Rock030','Rock020'].map(id=>{ const m=photoMat(id,2.2);
+    m.vertexColors=true; m.roughness=1; m.metalness=0; return m; });
+  const mSnowMat=new THREE.MeshStandardMaterial({color:0xf4f7fb,roughness:0.92,vertexColors:true}); // БЕЗ map: снег чистый, как в утверждённой лаборатории (map давал грязную крапинку)
+  const parts=[];
+  for(let t=0;t<2;t++)if(rockGs[t].length)parts.push([mergeGeometries(rockGs[t]),rockMats[t]]);
+  parts.push([mergeGeometries(snowGs),mSnowMat]);
+  rockGs.flat().forEach(g=>g.dispose()); snowGs.forEach(g=>g.dispose());
+  for(const [geo,mat] of parts){
+    const mA=new THREE.Mesh(geo,mat); mA.frustumCulled=false; scene.add(mA); MNT_A.push(mA);
+    const mB=new THREE.Mesh(geo,mat); mB.frustumCulled=false; scene.add(mB); MNT_B.push(mB); }
+  window.__MNTSTAT={hexes:mh.size,clusters:clusters.length,verts:vTot,step:+step.toFixed(3),
+    big:clusters.map(cl=>({n:cl.length,x:+cl[0].x.toFixed(1),z:+cl[0].z.toFixed(1)}))
+        .sort((a,b)=>b.n-a.n).slice(0,8)};
+}
+const _zeroM=new THREE.Matrix4().makeScale(0,0,0);
+function farShow(key,on){ const l=farReg.get(key); if(!l)return;
+  for(const e of l){ (on?e.m:_zeroM).toArray(e.att.array,e.i*16); e.att.needsUpdate=true; } }
+// окно полного декора: внутри — настоящие группы полигона, дальние инстансы гекса гасятся
+const DEC_R=62, DEC_DROP=74;
+const decMap=new Map(), decQueue=[];
+let decTX=1e9,decTZ=1e9;
+function decRescan(tx,tz){
+  decTX=tx; decTZ=tz; decQueue.length=0;
+  const sh0=Math.round(tx/WX)*WX, shB=sh0+(tx>=sh0?WX:-WX);
+  for(const im of FAR_A)im.position.x=sh0;        // лист кольца под камерой + сосед со стороны взгляда
+  const nearSeam=WX/2-Math.abs(tx-sh0)<260;       // вдали от шва второй лист не рисуем (полкадра даром)
+  for(const im of FAR_B){im.position.x=shB;im.visible=nearSeam;}
+  for(const im of MNT_A)im.position.x=sh0;        // горы-объекты ездят по кольцу теми же листами
+  for(const im of MNT_B){im.position.x=shB;im.visible=nearSeam;}
+  for(const c of CENTERS){
+    const d=Math.hypot(wdx(c.x,tx),c.z-tz), key=c.col+','+c.row, has=decMap.has(key);
+    if(d<DEC_R&&!has)decQueue.push([d,c]);
+    else if(d>DEC_DROP&&has){ const e=decMap.get(key); decMap.delete(key);
+      if(e.g){ scene.remove(e.g); e.g.traverse(o=>{if(o.geometry)o.geometry.dispose();}); }
+      farShow(key,true); }
+    else if(has){ const e=decMap.get(key); if(e&&e.tuf)e.tuf.visible=d<32; } }
+  decQueue.sort((a,b)=>a[0]-b[0]);
+}
+function decTick(ms){
+  const t0=performance.now();
+  while(decQueue.length&&performance.now()-t0<ms){
+    const [d,c]=decQueue.shift(), key=c.col+','+c.row;
+    if(decMap.has(key))continue;
+    farShow(key,false);
+    const t=c.pen?mkPen(c):c.dock?mkDock(c):c.farm?mkFarm(c):c.indB?indTile(c):(TILES[c.type]&&TILES[c.type](c.x,c.z,c));   // 14.10: загон/причал/пашня деревни; 15.10: здание промысла
+    if(!t){ decMap.set(key,{g:null}); continue; }
+    const px=c.x+Math.round((decTX-c.x)/WX)*WX;
+    if(c.type==='village'||c.type==='field'||c.farm){      // живые группы: их мало, мелочь важна (пашня — свои материалы с картой рельефа)
+      t.position.x=px; t.position.z=c.z;
+      scene.add(t); decMap.set(key,{g:t}); continue; }
+    // запекание: сотни мешей тайла → 2-6 (главное лекарство от 8400 вызовов за кадр)
+    const parts=bakeGroup(t,1,1,m=>m===tuftMat?'tuft':m===flowerMat?'flw':(m.map||0));
+    const grp=new THREE.Group();
+    for(const pb of parts){
+      if(pb.key==='tuft'||pb.key==='flw'){ pb.geo.dispose(); continue; } // трава убрана (вердикт 02.10)
+      const msh=new THREE.Mesh(pb.geo,bakedMat(pb.key,pb.map));
+      msh.castShadow=true; grp.add(msh); }
+    grp.position.set(px,0,c.z);
+    scene.add(grp); decMap.set(key,{g:grp,tuf:null}); } }
+
+// 15.10: клетка со зданием промысла (game.js ставит c.indB = hunt/lumber/quarry/fish): обычная клетка с поляной + здание kit
+function indTile(c){ CLR={x:c.x,z:c.z,r:1.9}; let g=null; try{ g=TILES[c.type]?TILES[c.type](c.x,c.z,c):null; } finally{ CLR=null; }
+  if(!g)g=new THREE.Group(); g.add(mkIndB(c.indB,c.x,c.z)); return g; }
+// 15.10: поселение сменило ступень / стало столицей — пересобрать его гекс (game.js зовёт из updateLabels)
+window.__vilRedraw=c=>{ const key=c.col+','+c.row, e=decMap.get(key); if(!e)return;
+  decMap.delete(key); if(e.g){ scene.remove(e.g); e.g.traverse(o=>{if(o.geometry)o.geometry.dispose();}); }
+  decQueue.unshift([0,c]); };
+window.__indSet=(kind,x,z)=>{ let b=null,bd=1e9;   // мостик стенда: промысел на клетку у реки (рыбацкий стан → мини-мостки), ближайшую к (x,z)
+  for(const c of CENTERS){ if(c.type==='water'||c.type==='mountain'||c.type==='village'||c.indB)continue; const rd=RV>0?riverD(c.x,c.z):99; if(rd<1.0||rd>2.6)continue;
+    const d=Math.hypot(wdx(c.x,x),c.z-z); if(d<bd){bd=d;b=c;} }
+  if(!b)return null; b.indB=kind; window.__vilRedraw(b); return {x:+b.x.toFixed(2),z:+b.z.toFixed(2),rd:+riverD(b.x,b.z).toFixed(2),type:b.type}; };
+window.__vilSet=(x,z,stg,cap)=>{ let b=null,bd=1e9; for(const c of CENTERS)if(c.type==='village'){ const d=Math.hypot(wdx(c.x,x),c.z-z); if(d<bd){bd=d;b=c;} }   // мостик стенда: примерить ступень
+  b.stg=stg; b.cap=cap||null; b.capCol=cap?'#3a6fc4':null; window.__vilRedraw(b); return [+b.x.toFixed(1),+b.z.toFixed(1)]; };
+
+// ================= ФИКС-КАМЕРА (цивовский ракурс) =================
+const q=new URLSearchParams(location.search);
+const CAMH=q.get('h')!=null?+q.get('h'):40;
+// 14.10: старт камеры — пятно игрока (2–3 деревни на выбор столицы) и пятно ИИ напротив по кольцу; выбираются до сборки,
+// чтобы первая перепечка красок шла сразу там, где игрок начнёт
+const pickSt=()=>pickStarts(TRAILS.VIL,{wdx,WX,dxH,MINZ,MAXZ});
+const START=pickSt();
+const CX=q.get('cx')!=null?+q.get('cx'):START.me.x, CZ=q.get('cz')!=null?+q.get('cz'):START.me.z;
+camera.position.set(CX,CAMH*0.82,CZ+CAMH*0.62);
+camera.lookAt(CX,0,CZ);
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.enableRotate=false;                          // фикс-ракурс
+controls.mouseButtons.LEFT=THREE.MOUSE.PAN;
+controls.touches.ONE=THREE.TOUCH.PAN;
+controls.enableDamping=true;controls.target.set(CX,0,CZ);
+controls.minDistance=8;controls.maxDistance=100;   // дальний обзор (просьба 02.10)
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);});
+// цив-камера: вблизи ложится горизонтальнее (видны фасады), вдали встаёт вертикальнее
+scene.add(sun.target);                     // тень едет за целью камеры
+// ===== МИНИКАРТА: клик = телепорт =====
+const mmW=224, mmH=Math.round(mmW*(ROWS*dzH)/(COLS*dxH));
+const mm=document.createElement('canvas'); mm.width=mmW; mm.height=mmH;
+mm.style.cssText='position:fixed;left:10px;bottom:10px;width:224px;border:1px solid rgba(20,26,30,.65);border-radius:6px;z-index:8;cursor:pointer;opacity:.92';
+document.body.appendChild(mm);
+const mmg=mm.getContext('2d');
+{ const MMCOL={water:'#3e5a66',meadow:'#7fae4e',forest:'#3f6d35',pines:'#2f5a40',hills:'#8a9a58',
+    mountain:'#8d8578',snow:'#e8ecef',desert:'#d9c188',dry:'#c9c070',tundra:'#aab398',
+    marsh:'#5d6b43',jungle:'#2e5c2e',savanna:'#c08848',village:'#cc9966',field:'#aa9977'};
+  for(let r2=0;r2<ROWS;r2++)for(let c2=0;c2<COLS;c2++){
+    mmg.fillStyle=MMCOL[KEY[MAP[r2][c2]]]||'#888';
+    mmg.fillRect(c2/COLS*mmW,r2/ROWS*mmH,mmW/COLS+1,mmH/ROWS+1); } }
+const mmBase=mmg.getImageData(0,0,mmW,mmH);
+let mmDrag=false,mmDragXY=null;
+const mmVil=CENTERS.filter(c=>c.type==='village').map(c=>[((normX(c.x)-WX0)/WX)*mmW,((c.z-MINZ)/(MAXZ-MINZ))*mmH,c]);
+function mmFrame(){ mmg.putImageData(mmBase,0,0);
+  // точки деревень — цвет из старого движка (240,230,208). Там они шли по тёмной краске земли с прозрачностью .45 и радиусом 1.1;
+  // здесь подложка пёстрая и светлая (песок, степь) — такая точка на ней не читается (кроп 11.10), поэтому плотная и с тёмным ободком
+  mmg.fillStyle='rgb(240,230,208)'; mmg.strokeStyle='rgba(20,26,30,.85)'; mmg.lineWidth=1;
+  for(const [vu,vv,c] of mmVil){ const cc=window.__mmVilCol&&window.__mmVilCol(c);     // столицы — цветом державы (game.js)
+    mmg.fillStyle=cc||'rgb(240,230,208)'; mmg.beginPath(); mmg.arc(vu,vv,cc?3.2:2,0,6.29); mmg.fill(); mmg.stroke(); }
+  let u,v;
+  if(mmDrag&&mmDragXY){ u=mmDragXY[0]; v=mmDragXY[1]; }
+  else { const T=controls.target;
+    u=((normX(T.x)-WX0)/WX)*mmW; v=((T.z-MINZ)/(MAXZ-MINZ))*mmH; }
+  mmg.strokeStyle='#fff'; mmg.lineWidth=2; mmg.strokeRect(u-9,v-7,18,14); }
+setInterval(mmFrame,500);
+function mmTeleport(clientX,clientY){
+  const r2=mm.getBoundingClientRect();
+  const wx=WX0+((clientX-r2.left)/r2.width)*WX, wz=MINZ+((clientY-r2.top)/r2.height)*(MAXZ-MINZ);
+  const k=Math.round((controls.target.x-wx)/WX)*WX;    // ближайший лист кольца
+  controls.target.x=wx+k; controls.target.z=wz;
+  terCX=1e9;splCX=1e9;decTX=1e9;                       // рескан немедленно + кусок полотна сразу
+  splBoost=1;                                          // краску после телепорта печём форсированно
+  terRescan(controls.target.x,controls.target.z); terTick(350);
+}
+window.__teleport=(x,z,d)=>{ controls.target.x=x; controls.target.z=z;          // мгновенный перенос камеры (новая партия, загрузка); d — дальность (стенд)
+  if(d){ const T=controls.target; camera.position.set(x,T.y+d*0.5,z+d*0.85); }
+  terCX=1e9;splCX=1e9;decTX=1e9; splBoost=1; terRescan(x,z); terTick(350); };
+window.__bakeHere=(x,z,ms)=>{ if(splCX!==x||splCZ!==z){ splCX=x;splCZ=z; splSetWindow(x,z); }   // стенд: синхронная пропечатка; окно НЕ пересоздавать (сбросило бы bakeRow)
+  splBoost=1; const t0=performance.now(); while(bakeRow<SPW&&performance.now()-t0<(ms||20000))splTick();
+  terRescan(x,z); terTick(4000); return [bakeRow,SPW,terQueue.length]; };          // в headless rAF спит — печка иначе не движется
+window.__splAt=(x,z)=>{ const px=Math.floor((x-SX0)/SW*SPW), py=Math.floor((z-SZ0)/SD*SPW);  // стенд: каналы сплата в точке мира
+  if(px<0||py<0||px>=SPW||py>=SPW)return 'вне окна';
+  const i=(py*SPW+px)*4, g=a=>[a[i],a[i+1],a[i+2],a[i+3]];
+  let ct=null,bd=1e9; for(const c of CENTERS){ const d=(c.x-x)**2+(c.z-z)**2; if(d<bd){bd=d;ct=c.type;} }
+  return {type:ct,sp:g(splData),sp2:g(splData2),sp3:g(splData3),sp4:g(splData4)}; };
+mm.addEventListener('pointerdown',e=>{ mmDrag=true; mm.setPointerCapture(e.pointerId);
+  const r2=mm.getBoundingClientRect();
+  mmDragXY=[(e.clientX-r2.left)/r2.width*mmW,(e.clientY-r2.top)/r2.height*mmH]; mmFrame(); e.preventDefault(); });
+mm.addEventListener('pointermove',e=>{ if(!mmDrag)return;
+  const r2=mm.getBoundingClientRect();
+  mmDragXY=[(e.clientX-r2.left)/r2.width*mmW,(e.clientY-r2.top)/r2.height*mmH]; mmFrame(); });
+mm.addEventListener('pointerup',e=>{ if(!mmDrag)return; mmDrag=false;
+  mmTeleport(e.clientX,e.clientY); mmFrame(); });
+let _rdy=false,_texOK=false;
+texMan.onLoad=()=>{_texOK=true;};
+setTimeout(()=>{_texOK=true;},25000);
+let terCX=1e9,terCZ=1e9,splCX=1e9,splCZ=1e9,_built=false;
+const bootEl=document.createElement('div');   // заставка: без неё Safari считал сборку зависанием и перезагружал
+// 14.10: вид — заставка старого движка (index.html 70–95): корона, «НОВАЯ ЦИВИЛИЗАЦИЯ», полоска, секундомер
+bootEl.style.cssText='position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;'+
+  'background:radial-gradient(1200px 700px at 50% 38%, #1d2b40 0%, #0d1521 62%, #090f18 100%);color:#eaf1fb;font-family:system-ui,sans-serif';
+bootEl.innerHTML='<div style="font-size:44px;color:#f4cd7e;text-shadow:0 2px 18px #f4cd7e55">♔</div>'+
+  '<div style="margin-top:10px;font-size:clamp(20px,5.2vw,32px);letter-spacing:6px;font-weight:700;white-space:nowrap">НОВАЯ ЦИВИЛИЗАЦИЯ</div>'+
+  '<div style="margin-top:14px;font-size:13.5px;opacity:.6">загрузка мира · <span id="bootP">0%</span></div>'+
+  '<div style="margin-top:14px;width:min(240px,60vw);height:5px;border-radius:3px;background:#ffffff22;overflow:hidden"><div id="bootF" style="height:100%;width:3%;border-radius:3px;background:#f4cd7e"></div></div>'+
+  '<div id="bootT" style="margin-top:10px;font-size:12px;opacity:.45;font-variant-numeric:tabular-nums"></div>';
+{ const t0=performance.now(); const iv=setInterval(()=>{ const e=document.getElementById('bootT'); if(!e){ clearInterval(iv); return; }
+  e.textContent='прошло '+Math.round((performance.now()-t0)/1000)+' с'; },500); }
+document.body.appendChild(bootEl);
+(async()=>{ // ПЕРВИЧНАЯ СБОРКА — кусками ≤120 мс с передышками для браузера
+  const Y=()=>new Promise(r=>setTimeout(r,0));
+  const Pr=t=>{const e=document.getElementById('bootP'); if(e)e.textContent=t; const f=document.getElementById('bootF'), m=/(\d+)%/.exec(t); if(f&&m)f.style.width=m[1]+'%';};
+  terCX=CX;terCZ=CZ;splCX=CX;splCZ=CZ;
+  splSetWindow(CX,CZ);
+  while(bakeRow<SPW){ const t0=performance.now();
+    while(bakeRow<SPW&&performance.now()-t0<120)splTick();
+    Pr('краски '+Math.round(bakeRow/SPW*50)+'%'); await Y(); }
+  window.__t_bake=Math.round(performance.now());
+  terRescan(CX,CZ);
+  const tq0=terQueue.length||1;
+  while(terQueue.length){ terTick(120);
+    Pr('земля '+Math.round(50+(1-terQueue.length/tq0)*35)+'%'); await Y(); }
+  decRescan(CX,CZ);
+  const dq0=decQueue.length||1;
+  while(decQueue.length){ decTick(120);
+    Pr('деревья '+Math.round(85+(1-decQueue.length/dq0)*15)+'%'); await Y(); }
+  updRivU(CX,CZ);
+  window.__t_ter=Math.round(performance.now());
+  _built=true; bootEl.remove();
+  let tkN=0; const PRF=window.__perf={spl:0,ter:0,dec:0};
+  (function waitTex(){ if(_texOK){_rdy=true;window.__ready=true;} else setTimeout(waitTex,200); })();
+  setInterval(()=>{                       // догрузка при движении: тикает по часам, не по кадрам
+    const T=controls.target;
+    if(Math.hypot(T.x-terCX,T.z-terCZ)>12){terCX=T.x;terCZ=T.z;terRescan(T.x,T.z);}
+    if(Math.hypot(T.x-splCX,T.z-splCZ)>70){splCX=T.x;splCZ=T.z;splSetWindow(T.x,T.z);}
+    if(Math.hypot(T.x-decTX,T.z-decTZ)>9){ const p0=performance.now(); decRescan(T.x,T.z); PRF.dec+=performance.now()-p0; }
+    if(++tkN%3===0){ let p0=performance.now(); terTick(12); PRF.ter+=performance.now()-p0;
+      p0=performance.now(); decTick(10); PRF.dec+=performance.now()-p0; }
+    { const p0=performance.now(); splTick(); PRF.spl+=performance.now()-p0; }
+    trTick();
+    updRivU(T.x,T.z);
+  },16);
+})();
+// ===== ЭТАП Б, ШАГ 1 (10.10): НАВЕДЕНИЕ НА ГЕКС — перенос initHover старого движка (index.html 6144–6316) =====
+// Как там: подсветка = залитый шестиугольник по рельефу + подсказка у курсора; клик по пустому гексу ничего не делает.
+(function initHover(){
+  const BINFO={
+    water:['Вода','#3f79c8','гладь'],
+    meadow:['Луг','#7fae54','идти легко'],
+    forest:['Лес','#3f6b33','почти непроходимо'],
+    marsh:['Болото','#77704a','топко, вязко'],
+    desert:['Пустыня','#e9d6a0','зной, идти тяжело'],
+    dry:['Степь','#b3a262','сухие травы, идти легко'],
+    hills:['Холмы','#9aa08f','камень и щебень'],
+    tundra:['Тундра','#b3b8ac','мёрзлая пустошь'],
+    snow:['Снега','#e9eef2','полярная шапка'],
+    // типов ниже в старом движке не было — подписи по ближайшему биому
+    pines:['Хвойный лес','#2f5a40','почти непроходимо'],
+    jungle:['Джунгли','#2e5c2e','чаща · труднее леса'],
+    savanna:['Саванна','#c08848','выжженные травы, стада дичи — земля большой охоты'],
+    field:['Поле','#aa9977','пашня'],
+  };
+  const st=document.createElement('style'); st.textContent=`
+    #g-tip{position:fixed;z-index:20;pointer-events:none;min-width:134px;max-width:212px;
+      background:#12233af5;color:#eef4fb;border-radius:12px;box-shadow:0 8px 22px #0008;
+      font-family:system-ui,sans-serif;font-size:12.5px;line-height:1.4;opacity:0;
+      transform:translateY(4px);transition:opacity .12s, transform .12s;overflow:hidden}
+    #g-tip.on{opacity:1;transform:translateY(0)}
+    #g-tip .strip{height:6px}
+    #g-tip .in{padding:8px 12px 10px}
+    #g-tip .ttl{font-size:14px;font-weight:700;letter-spacing:.2px}
+    #g-tip .sub{font-size:11.5px;opacity:.72;margin-top:1px}
+    #g-tip .row{display:flex;justify-content:space-between;gap:16px;margin-top:5px}
+    #g-tip .row .k{opacity:.64} #g-tip .row .v{font-weight:600}
+  `;
+  const tip=document.createElement('div'); tip.id='g-tip';
+  document.head.appendChild(st); document.body.appendChild(tip);
+
+  const WSURF=-0.62, LIFT=0.12, SUB=4;             // гладь; подъём заливки; дробление сектора (рельеф не протыкает заливку)
+  const hlGeo=new THREE.BufferGeometry();
+  hlGeo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(6*SUB*SUB*3*3),3));
+  const hl=new THREE.Mesh(hlGeo,new THREE.MeshBasicMaterial({color:0xffe08a,transparent:true,
+    opacity:0.30,depthWrite:false,side:THREE.DoubleSide}));
+  hl.renderOrder=4; hl.visible=false; hl.frustumCulled=false; scene.add(hl);
+  const _hp=hlGeo.attributes.position.array;
+  function drapeHex(c,hx){ // hx — центр на том листе кольца, где курсор
+    const cz=c.z; let o=0;
+    const put=(lx,lz)=>{ _hp[o++]=lx; _hp[o++]=Math.max(heightAt(hx+lx,cz+lz),WSURF)+LIFT; _hp[o++]=lz; };
+    for(let k=0;k<6;k++){
+      const a0=(30+60*k)*Math.PI/180, a1=(30+60*(k+1))*Math.PI/180;
+      const ax=Math.cos(a0)*HEXR, az=Math.sin(a0)*HEXR, bx=Math.cos(a1)*HEXR, bz=Math.sin(a1)*HEXR;
+      const P=(i,j)=>[(ax*(i-j)+bx*j)/SUB,(az*(i-j)+bz*j)/SUB];   // i — кольцо от центра, j — вдоль ребра
+      for(let i=0;i<SUB;i++)for(let j=0;j<=i;j++){
+        const p0=P(i,j),p1=P(i+1,j),p2=P(i+1,j+1);
+        put(p0[0],p0[1]);put(p1[0],p1[1]);put(p2[0],p2[1]);
+        if(j<i){ const p3=P(i,j+1); put(p0[0],p0[1]);put(p2[0],p2[1]);put(p3[0],p3[1]); } } }
+    hlGeo.attributes.position.needsUpdate=true; hl.position.set(hx,0,cz);
+  }
+  // крутизна клетки — как hexSlope старого: наибольший перепад к соседу, высоты ниже уреза режем по урезу
+  const NB_E=[[1,0],[-1,0],[-1,-1],[0,-1],[-1,1],[0,1]], NB_O=[[1,0],[-1,0],[0,-1],[1,-1],[0,1],[1,1]];
+  // 17.10 (Артём: ровная клетка у горы подписана «Крутой склон»): наклон мерится ВНУТРИ клетки — перепад между точками
+  // у противоположных краёв (0.75 внутреннего радиуса), приведённый к шагу между центрами. Раньше — перепад до центра соседа:
+  // одна гора рядом делала крутой любую ровную клетку. Порог прежний (0.85·K на шаг клетки).
+  function slopeOf(c){ if(c._slp!==undefined)return c._slp;
+    const hO=(x,z)=>Math.max(heightAt(x,z),WSURF), r=0.75*Math.sqrt(3)/2*HEXR, step=Math.sqrt(3)*HEXR; let mx=0;
+    for(let k=0;k<3;k++){ const a=k*Math.PI/3, dx=Math.cos(a)*r, dz=Math.sin(a)*r;
+      const d=Math.abs(hO(c.x+dx,c.z+dz)-hO(c.x-dx,c.z-dz))/(2*r)*step; if(d>mx)mx=d; }
+    return c._slp=mx; }
+  const K=HEXR/2.0;                                // масштаб к старому миру (там радиус гекса 2.0): пороги высот ×K
+  const ray=new THREE.Raycaster(), ndc=new THREE.Vector2();
+  function groundHit(cx,cy){ // точка поверхности (земля или гладь) под курсором: шаг по лучу против heightAt
+    ndc.x=(cx/innerWidth)*2-1; ndc.y=-(cy/innerHeight)*2+1; ray.setFromCamera(ndc,camera);
+    const o=ray.ray.origin,d=ray.ray.direction;
+    const gap=t=>o.y+d.y*t-Math.max(heightAt(o.x+d.x*t,o.z+d.z*t),WSURF);
+    let t=0,prev=0;
+    for(let n=0;n<220&&t<900;n++){ const g=gap(t);
+      if(g<=0){ let a=prev,b=t; for(let i=0;i<12;i++){const m=(a+b)/2; if(gap(m)<=0)b=m;else a=m;}
+        return {x:o.x+d.x*b,z:o.z+d.z*b}; }
+      prev=t; t+=Math.min(8,Math.max(0.35,g*0.5)); }
+    return null;
+  }
+  let lastKey='';
+  function hide(){ tip.classList.remove('on'); hl.visible=false; lastKey=''; window.__hov=null; }
+  function hover(cx,cy){
+    const p=groundHit(cx,cy);
+    if(!p||p.z<MINZ||p.z>MAXZ){ hide(); return; }
+    const c=hexAt(normX(p.x),p.z);
+    if(!c||c.type==='mountain'){ hide(); return; }               // ГОРА — не клетка: ни подсветки, ни подсказки
+    const hx=c.x+Math.round((p.x-c.x)/WX)*WX, key=c.col+','+c.row+','+hx;
+    if(key!==lastKey){ drapeHex(c,hx); lastKey=key; }
+    hl.visible=true;
+    const [bn,bc,bd]=BINFO[c.type]||BINFO.meadow;
+    const hh=heightAt(p.x,p.z);
+    const vd=c.type==='village'?null:VD.at(p.x,p.z);              // виртуальная глубина: та же функция пойдёт в расчёт брода
+    const fm=D=>D<10?D.toFixed(1):D.toFixed(0);
+    let ttl,tsub,tcol,extra='';
+    const nt=c.type!=='village'&&window.__nestTip?window.__nestTip(c):null;   // 21.10: стойбище — своя всплывашка
+    if(nt){ ttl=nt.ttl; tsub=nt.sub; tcol='#e0703e';
+      extra=nt.rows.map(r=>`<div class="row"><span class="k">${r[0]}</span><span class="v">${r[1]}</span></div>`).join('')
+        +`<div class="row"><span class="k">Местность</span><span class="v">${bn}</span></div>`; }
+    else if(c.type==='village'){ ttl='Деревня'; tsub='поселение'; tcol='#caa25a';
+      const vt=window.__vilTip&&window.__vilTip(c);                // игровой слой (game.js): имя/стадия/население, как в старом
+      if(vt){ ttl=vt.ttl; tsub=vt.sub; extra=vt.rows.map(r=>`<div class="row"><span class="k">${r[0]}</span><span class="v">${r[1]}</span></div>`).join('')+((BINFO[c.was]&&vt.loc)?`<div class="row"><span class="k">Местность</span><span class="v">${BINFO[c.was][0]}</span></div>`:''); } }
+    else if(vd&&vd.kind==='river'){
+      const D=vd.D, word = D<FORD_MAX ? 'мелко · можно вброд' : D<5 ? 'глубоко · вброд нельзя' : 'полноводна · только паром';
+      ttl='Река'; tcol='#4a90d8'; tsub=['ручей','средняя река','крупная река'][vd.cls];
+      extra=`<div class="row"><span class="k">Глубина</span><span class="v">${word} · ${fm(D)} м</span></div>
+        <div class="row"><span class="k">Берега</span><span class="v">${bn}</span></div>`;
+    } else {
+      ttl=bn; tcol=bc; tsub=bd;
+      if(vd){
+        const D=vd.D, word = D<FORD_MAX ? 'мелко · можно вброд' : D<5 ? 'глубоко · вброд нельзя' : 'глубоко · только паром';
+        extra=`<div class="row"><span class="k">Глубина</span><span class="v">${word} · ${fm(D)} м</span></div>`;
+        if(c.type!=='water'){ ttl=BINFO.water[0]; tcol=BINFO.water[1]; tsub=BINFO.water[2]; }
+        else if(vd.lake)ttl='Озеро'; else if(vd.far)tsub='открытое море';
+      } else if(c.type!=='water'&&c.type!=='hills'){
+        // рельеф в заголовке, как в старом: высоко → «Горный склон», крутая клетка → «Крутой склон»; строки «Почва» нет — в новом мире нет карты влажности
+        if(hh>2.5*K){ ttl='Горный склон'; tsub=bn.toLowerCase()+' высоко в горах'; tcol='#8d8d95'; }
+        else if(slopeOf(c)>=0.85*K){ ttl='Крутой склон'; tsub=bn.toLowerCase()+' на круче'; tcol='#a4906c'; }
+      }
+    }
+    tip.innerHTML=`<div class="strip" style="background:${tcol}"></div><div class="in">
+      <div class="ttl">${ttl}</div><div class="sub">${tsub}</div>${extra}</div>`;
+    tip.classList.add('on');
+    const pad=15; let x=cx+pad, y=cy+pad;
+    const r=tip.getBoundingClientRect();
+    if(x+r.width>innerWidth-6) x=cx-pad-r.width;
+    if(y+r.height>innerHeight-6) y=cy-pad-r.height;
+    tip.style.left=Math.max(6,x)+'px'; tip.style.top=Math.max(6,y)+'px';
+    window.__hov={col:c.col,row:c.row,type:c.type,ttl,sub:tsub,x:+p.x.toFixed(1),z:+p.z.toFixed(1),h:+hh.toFixed(2),slp:+slopeOf(c).toFixed(2),D:vd?+vd.D.toFixed(2):null};
+  }
+  const dom=renderer.domElement; let pend=null;
+  dom.addEventListener('pointerleave',()=>{ pend=null; hide(); });
+  dom.addEventListener('pointermove',ev=>{                       // не чаще раза за кадр: луч считается по heightAt
+    const first=!pend; pend=[ev.clientX,ev.clientY];
+    if(first)requestAnimationFrame(()=>{ if(!pend)return; const q=pend; pend=null; if(_built)hover(q[0],q[1]); }); });
+  window.__hoverAt=(cx,cy)=>{ hover(cx,cy); return window.__hov; };
+  window.__groundHit=groundHit;   // мостик для стендовых проверок
+})();
+// ===== ИГРОВОЙ СЛОЙ (14.10): плашки поселений (updateLabels старого), шапка, ход, столица, меню — в game.js =====
+const GAME=initGame({THREE,scene,camera,controls,renderer,VIL:TRAILS.VIL,TRAILS,heightAt,normX,wdx,WX,HEXR,dxH,hexAt,
+  groundHit:(cx,cy)=>window.__groundHit(cx,cy),START,pickStarts:pickSt,teleport:(x,z)=>window.__teleport(x,z),
+  neighbors:c=>hexDirs(c.row).map(([dc,dr])=>HEXMAP.get((((c.col+dc)%COLS+COLS)%COLS)+','+(c.row+dr))).filter(Boolean),
+  riverNear:n=>RV>0&&riverD(n.x,n.z)<HEXR*0.6,
+  hexes:CENTERS,COLS,riverDist:(x,z)=>RV>0?riverD(x,z):99,routeTree:c=>TRAILS.routeTree(c),units:UNITS3,unitGraph:()=>TRAILS.graph(),redrawHex:c=>window.__vilRedraw(c),
+  setGrid:on=>{ if(terU)terU.uGrid.value=on?0.45:0; }});
+(function loop(){requestAnimationFrame(loop);
+  if(!_built)return;
+  { const tn=performance.now()*0.001;                 // живая вода: два слоя ряби бегут в шейдере (старый uLabT)
+    waterUniforms.uLabT.value=tn;
+    if(terU)terU.uTime.value=tn; }
+  controls.update();
+  const T=controls.target;
+  T.z=Math.max(MINZ+9,Math.min(MAXZ-9,T.z));        // 08.10: физический край — дальше ледников не уедешь (по X мир кольцо)
+  const d=camera.position.distanceTo(T);
+  const t=Math.min(1,Math.max(0,(d-24)/(84-24)));   // 15.10: ложится ещё раньше и ниже (было 16..56 м, 28..64°)
+  const el=(24+(64-24)*t)*Math.PI/180;
+  scene.fog.near=0.55*d+36; scene.fog.far=Math.min(265,2.1*d+85);  // туман отъезжает с зумом
+  T.y=Math.max(-0.4,heightAt(T.x,T.z));             // цель на рельефе: зум в гору не ныряет
+  camera.position.set(T.x,T.y+Math.sin(el)*d,T.z+Math.cos(el)*d);
+  const hc=heightAt(camera.position.x,camera.position.z)+1.1;
+  if(camera.position.y<hc)camera.position.y=hc;      // камера никогда не под землёй
+  camera.lookAt(T);
+  if(terU)terU.uCamD.value=d;                        // ширина речной нитки растёт с отлётом
+  waterMesh.position.set(T.x,-0.62,T.z);
+  sun.position.set(T.x+28,40,T.z+30); sun.target.position.set(T.x,0,T.z);
+  renderer.render(scene,camera);
+  GAME.frame();
+  if(!window.__riT||performance.now()-window.__riT>1000){ window.__riT=performance.now();
+    window.__ri={calls:renderer.info.render.calls,tris:renderer.info.render.triangles}; }})();
+</script>
+</body>
+</html>

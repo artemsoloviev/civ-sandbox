@@ -1,0 +1,232 @@
+<!doctype html>
+<!-- ПРОБА 27.09 (утв. «делай»): новая графика «нарисовано кодом» в духе Old World/Civ6.
+     Из игры берутся ТОЛЬКО ДАННЫЕ (map1.json: биомы/реки/высоты/поселения с map=1&size=2&wrap=1),
+     весь внешний вид рисуется здесь с нуля на canvas. Параметры: ?cx=&cz=&r= (центр и радиус обзора
+     в мировых метрах), по умолчанию — вокруг столицы. -->
+<html lang="ru"><head><meta charset="utf-8"><title>Проба тайлов</title>
+<style>html,body{margin:0;background:#1a1f28;overflow:hidden}canvas{display:block;margin:0 auto}</style></head>
+<body><canvas id="cv" width="1280" height="800"></canvas>
+<script>
+(async()=>{
+const D=await (await fetch('map1.json?'+Math.random())).json();
+const q=new URLSearchParams(location.search);
+const cap=D.lm.find(l=>l.cap)||D.lm[0];
+const CX=q.get('cx')!=null?+q.get('cx'):cap.x, CZ=q.get('cz')!=null?+q.get('cz'):cap.z;
+const RAD=q.get('r')!=null?+q.get('r'):26;                    // радиус обзора, мировых метров
+const cv=document.getElementById('cv'), W=cv.width, H=cv.height, ctx=cv.getContext('2d');
+const S=W/(RAD*2);                                            // пикселей на метр
+const TILT=0.86;                                              // лёгкий «наклон» вида (сжатие по вертикали)
+const sx=wx=>(wx-CX)*S+W/2, sy=wz=>(wz-CZ)*S*TILT+H/2;
+const WATER=D.WATER;
+
+// ---------- шум (детерминированный, без библиотек) ----------
+const hash=(x,y)=>{ let n=(x*374761393 + y*668265263)|0; n=((n^(n>>13))*1274126177)|0; n=n^(n>>16);   // целочисленный хэш: sin-хэш давал диагональные полосы
+  return (n>>>0)/4294967295; };
+function vnoise(x,y){ const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi;
+  const u=xf*xf*(3-2*xf), v=yf*yf*(3-2*yf);
+  const a=hash(xi,yi), b=hash(xi+1,yi), c=hash(xi,yi+1), d=hash(xi+1,yi+1);
+  return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v; }
+const fbm=(x,y)=>0.55*vnoise(x,y)+0.28*vnoise(x*2.3+7,y*2.3+3)+0.17*vnoise(x*5.1+13,y*5.1+11);
+
+// ---------- сетка гексов для быстрого поиска ближайших ----------
+const cells=new Map(); const CS=3.2;                          // ячейка ~ полтора гекса
+const ck=(x,z)=>Math.floor(x/CS)+'_'+Math.floor(z/CS);
+D.hexes.forEach((h,i)=>{ const k=ck(h.x,h.z); (cells.get(k)||cells.set(k,[]).get(k)).push(i); });
+function near2(x,z){                                          // три ближайших гекса (смесь на границах без фасеток)
+  let b1=-1,d1=1e9,b2=-1,d2=1e9,b3=-1,d3=1e9;
+  const gx=Math.floor(x/CS), gz=Math.floor(z/CS);
+  for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){ const arr=cells.get((gx+a)+'_'+(gz+b)); if(!arr) continue;
+    for(const i of arr){ const h=D.hexes[i], dx=h.x-x, dz=h.z-z, d=dx*dx+dz*dz;
+      if(d<d1){ d3=d2;b3=b2; d2=d1;b2=b1; d1=d;b1=i; }
+      else if(d<d2){ d3=d2;b3=b2; d2=d;b2=i; }
+      else if(d<d3){ d3=d;b3=i; } } }
+  return [b1,Math.sqrt(d1),b2,Math.sqrt(d2),b3,Math.sqrt(d3)];
+}
+function field3(x,z,val){                                     // гладкое поле по 3 ближним (веса 1/d²)
+  const [i1,d1,i2,d2,i3,d3]=near2(x,z); if(i1<0) return 0;
+  let s=0,w=0; [[i1,d1],[i2,d2],[i3,d3]].forEach(([i,d])=>{ if(i<0) return;
+    const k=1/(d*d+1.1); s+=val(i)*k; w+=k; });
+  return s/w;
+}
+
+// ---------- палитры биомов (0 вода,1 луг,2 лес,3 болото,4 пески,5 холмы,6 горы,7 степь,8 тундра,9 льды) ----------
+// [светлый, основной, тёмный] — смешиваются шумом «мазками»
+const PAL={
+  0:[[70,142,160],[42,100,142],[22,60,100]],
+  1:[[126,168,84],[106,150,72],[88,132,62]],
+  2:[[96,138,70],[80,122,60],[64,104,50]],
+  3:[[92,116,74],[74,100,66],[58,84,56]],
+  4:[[224,196,140],[208,178,120],[186,156,102]],
+  5:[[142,150,96],[122,132,84],[102,112,72]],
+  6:[[148,140,128],[124,118,108],[100,96,90]],
+  7:[[176,172,102],[158,152,88],[136,132,76]],
+  8:[[172,178,158],[152,160,142],[130,140,124]],
+  9:[[228,238,244],[210,224,234],[188,206,220]]
+};
+const mix=(a,b,t)=>[a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+
+// ---------- расстояние воды до берега (волна по сетке гексов) — глубина без «гранёных ромбов» ----------
+const byQR=new Map(); D.hexes.forEach((h,i)=>byQR.set(h.q+'_'+h.r,i));
+const NB6=[[1,0],[-1,0],[0,1],[0,-1],[1,-1],[-1,1]];
+const ldist=new Float32Array(D.hexes.length).fill(99);
+{ const qq=[]; D.hexes.forEach((h,i)=>{ if(h.b!==0){ ldist[i]=0; qq.push(i); } });
+  for(let k=0;k<qq.length;k++){ const i=qq[k], h=D.hexes[i];
+    for(const [dq,dr] of NB6){ const j=byQR.get((h.q+dq)+'_'+(h.r+dr));
+      if(j!==undefined && ldist[j]>ldist[i]+1){ ldist[j]=ldist[i]+1; qq.push(j); } } } }
+
+// ---------- слой 1: земля (по-пиксельно, один раз) ----------
+const ySmooth=(x,z)=>field3(x,z,i=>D.hexes[i].y);
+const smooth=(a,b,x)=>{ const t=Math.max(0,Math.min(1,(x-a)/(b-a))); return t*t*(3-2*t); };
+const img=ctx.createImageData(W,H); const px=img.data;
+for(let py=0;py<H;py++){
+  const wz=(py-H/2)/(S*TILT)+CZ;
+  for(let pxi=0;pxi<W;pxi++){
+    const wx=(pxi-W/2)/S+CX;
+    const [i1,d1,i2,d2]=near2(wx,wz);
+    if(i1<0){ px.set([26,31,40,255],(py*W+pxi)*4); continue; }
+    const h1=D.hexes[i1], h2=i2>=0?D.hexes[i2]:h1;
+    let b=h1.b, b2=h2.b;
+    // ИЗВИЛИСТЫЙ БЕРЕГ: у стыка «вода↔суша» линия уреза гуляет шумом — рубленых гексов не видно.
+    // Извилина ГАСНЕТ с удалением от ребра (иначе перескакивала весь соседний гекс и рвалась на его крае)
+    const jitRaw=1.0*(fbm(wx*1.35+201,wz*1.35+87)-0.5)+0.45*(fbm(wx*3.1+11,wz*3.1+43)-0.5);
+    const fall=1-smooth(0,2.1,d2-d1);
+    const jit=jitRaw*fall;
+    let sw=false;
+    if(b===0 ^ b2===0){ const e=(d2-d1)*0.5+jit;              // e<0 = пиксель «перепрыгнул» урез
+      if(e<0){ const tb=b; b=b2; b2=tb; sw=true; } }
+    // мягкая граница биомов: близко к стыку подмешиваем соседа, кромка гуляет шумом
+    let t=smooth(0,1.7,(d2-d1)+1.1*(fbm(wx*0.85,wz*0.85)-0.5));
+    const n=fbm(wx*1.6,wz*1.6), n2=vnoise(wx*6+31,wz*6+17);   // крупные пятна + мелкое зерно
+    const pick=P=>{ const c1=mix(P[2],P[0],smooth(0.3,0.7,n)); return mix(c1, P[1], 0.3+0.25*(n2-0.5)); };
+    let c=pick(PAL[b]||PAL[1]);
+    if(b===6) c=mix(c,pick(PAL[7]),0.35);                     // подножия гор — не серые пятна, трава пробивается
+    if(b2!==b && b2!==0 && b!==0){ let c2=pick(PAL[b2]||PAL[1]); if(b2===6) c2=mix(c2,pick(PAL[7]),0.35);
+      c=mix(c2,c,0.5+0.5*t); }
+    // вода: глубина растёт от берега плавно, у самого уреза — узкая песчаная нить
+    if(b===0){
+      const ldp=field3(wx,wz,i=>ldist[i]);                    // гладкая «удалённость от берега»
+      const deep=smooth(0.3,3.0,ldp+jit*0.7+(fbm(wx*0.8+71,wz*0.8+19)-0.5)*1.5);
+      c=mix(PAL[0][0], PAL[0][2], 0.15+0.85*deep);
+      const wn=(fbm(wx*2.1+53,wz*2.1+29)-0.5)*0.12;           // лёгкая рябь тона
+      c=[c[0]*(1+wn),c[1]*(1+wn),c[2]*(1+wn)];
+      const dd=(b2!==0? (d2-d1)*0.5+jit : 9);
+      if(dd<0.22) c=mix([204,184,140],c,0.6);                 // песчаная нить
+    } else if(b2===0){
+      const dd=(d2-d1)*0.5+jit;
+      if(dd<0.3) c=mix([206,188,146],c,0.55*(1-dd/0.3));      // мокрый песок и на суше у уреза
+    }
+    if(b!==0){
+      // светотень рельефа: ГЛАДКАЯ высота (взвешенная по трём ближним гексам, широкий шаг градиента)
+      const y0=ySmooth(wx,wz), yx=ySmooth(wx+2.0,wz), yz=ySmooth(wx,wz+2.0);
+      const sl=Math.max(-0.6,Math.min(0.6,(y0-yx)*0.45+(y0-yz)*0.38));
+      const l=1+sl*(sw?0.12:0.4)+(fbm(wx*0.33+91,wz*0.33+47)-0.5)*0.12;   // на «перенесённой» кромке рельеф не темнит
+      c=[c[0]*l,c[1]*l,c[2]*l];
+    }
+    const o=(py*W+pxi)*4; px[o]=c[0]; px[o+1]=c[1]; px[o+2]=c[2]; px[o+3]=255;
+  }
+}
+ctx.putImageData(img,0,0);
+
+// ---------- слой 2: реки (полилинии из дампа; ширина растёт от истока к устью) ----------
+function drawRivers(){
+  ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round';
+  D.rivers.forEach(R=>{
+    const P=R.pts; if(P.length<2) return;
+    const wEnd=Math.max(2.2,(R.w||0.4)*S*0.66);
+    for(let i=1;i<P.length;i++){
+      const a=P[i-1], b=P[i];
+      if(!inViewPt(a)&&!inViewPt(b)) continue;
+      const [ia]=near2(a[0],a[1]), [ib]=near2(b[0],b[1]);
+      if((ia>=0&&D.hexes[ia].b===0)||(ib>=0&&D.hexes[ib].b===0)) continue;   // река не рисуется по озеру/морю (тёмные «берега» поверх воды)
+      const k=i/(P.length-1), w=Math.max(1.6,wEnd*(0.35+0.65*k));
+      seg(a,b,w+2.6,'rgba(60,76,44,0.42)');
+      seg(a,b,w,'rgb(56,106,138)');
+      seg(a,b,Math.max(1,w*0.36),'rgba(140,190,214,0.35)');
+    }
+  });
+  ctx.restore();
+  function seg(a,b,w,st){ ctx.beginPath(); ctx.lineWidth=w; ctx.strokeStyle=st;
+    ctx.moveTo(sx(a[0]),sy(a[1])); ctx.lineTo(sx(b[0]),sy(b[1])); ctx.stroke(); }
+}
+const inViewPt=p=>Math.abs(p[0]-CX)<RAD+6&&Math.abs(p[1]-CZ)<RAD+6;
+drawRivers();
+
+// ---------- спрайты (рисуются кодом в offscreen, штампуются с сортировкой по глубине) ----------
+const sprites=[];                                             // {y, draw}
+const rr=i=>hash(i*0.731,i*1.377);                            // детерминированный рандом по гексу
+function tree(X,Y,s,v){ return ()=>{                          // «пятно» кроны с бликом и тенью; v 0..1 — оттенок
+  ctx.beginPath(); ctx.ellipse(X+s*0.18,Y+s*0.34,s*0.62,s*0.2,0,0,7); ctx.fillStyle='rgba(30,44,26,0.3)'; ctx.fill();
+  ctx.fillStyle='#5c4326'; ctx.fillRect(X-s*0.07,Y-s*0.05,s*0.14,s*0.42);
+  const g=ctx.createRadialGradient(X-s*0.25,Y-s*0.75,s*0.1,X,Y-s*0.5,s*0.85);
+  const L=mix([121,165,92],[148,186,101],v), Dk=mix([57,99,54],[76,116,61],v);
+  const lite=`rgb(${L[0]|0},${L[1]|0},${L[2]|0})`, dark=`rgb(${Dk[0]|0},${Dk[1]|0},${Dk[2]|0})`;
+  g.addColorStop(0,lite); g.addColorStop(1,dark);
+  ctx.beginPath();
+  ctx.moveTo(X,Y-s*1.5);
+  ctx.bezierCurveTo(X+s*0.7,Y-s*1.15,X+s*0.75,Y-s*0.35,X+s*0.5,Y);
+  ctx.bezierCurveTo(X+s*0.2,Y+s*0.12,X-s*0.2,Y+s*0.12,X-s*0.5,Y);
+  ctx.bezierCurveTo(X-s*0.75,Y-s*0.35,X-s*0.7,Y-s*1.15,X,Y-s*1.5);
+  ctx.fillStyle=g; ctx.fill();
+  ctx.strokeStyle='rgba(36,56,32,0.5)'; ctx.lineWidth=1; ctx.stroke(); };}
+function mountain(X,Y,s,sn,v){ v=v||0; return ()=>{           // пик: светлая и теневая грань + снег; v — тёплый сдвиг тона
+  ctx.beginPath(); ctx.ellipse(X+s*0.2,Y+s*0.16,s*1.05,s*0.3,0,0,7); ctx.fillStyle='rgba(40,42,40,0.3)'; ctx.fill();
+  const lf=mix([143,138,128],[152,140,118],v), df=mix([107,102,95],[112,100,84],v);
+  ctx.beginPath(); ctx.moveTo(X-s,Y+s*0.22); ctx.lineTo(X-s*0.12,Y-s*1.15); ctx.lineTo(X+s*0.12,Y+s*0.22); ctx.closePath();
+  ctx.fillStyle=`rgb(${lf[0]|0},${lf[1]|0},${lf[2]|0})`; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(X+s,Y+s*0.22); ctx.lineTo(X-s*0.12,Y-s*1.15); ctx.lineTo(X-s*0.28,Y+s*0.22); ctx.closePath();
+  ctx.fillStyle=`rgb(${df[0]|0},${df[1]|0},${df[2]|0})`; ctx.fill();
+  if(sn){ ctx.beginPath(); ctx.moveTo(X-s*0.12,Y-s*1.15); ctx.lineTo(X+s*0.24,Y-s*0.6);
+    ctx.lineTo(X+s*0.05,Y-s*0.52); ctx.lineTo(X-s*0.1,Y-s*0.66); ctx.lineTo(X-s*0.3,Y-s*0.55); ctx.closePath();
+    ctx.fillStyle='#eef2f5'; ctx.fill(); }
+  ctx.strokeStyle='rgba(50,48,44,0.55)'; ctx.lineWidth=1.1;
+  ctx.beginPath(); ctx.moveTo(X-s,Y+s*0.22); ctx.lineTo(X-s*0.12,Y-s*1.15); ctx.lineTo(X+s,Y+s*0.22); ctx.stroke(); };}
+function hill(X,Y,s){ return ()=>{
+  const g=ctx.createLinearGradient(X-s,Y,X+s,Y);
+  g.addColorStop(0,'#9aa26a'); g.addColorStop(1,'#7c8656');
+  ctx.beginPath(); ctx.moveTo(X-s,Y); ctx.quadraticCurveTo(X,Y-s*0.85,X+s,Y); ctx.closePath();
+  ctx.fillStyle=g; ctx.fill(); ctx.strokeStyle='rgba(70,78,48,0.45)'; ctx.lineWidth=1; ctx.stroke(); };}
+function house(X,Y,s,cap){ return ()=>{
+  ctx.beginPath(); ctx.ellipse(X+s*0.15,Y+s*0.3,s*0.9,s*0.28,0,0,7); ctx.fillStyle='rgba(40,36,24,0.35)'; ctx.fill();
+  ctx.fillStyle='#c8b48c'; ctx.fillRect(X-s*0.55,Y-s*0.3,s*1.1,s*0.6);          // стены (светлая)
+  ctx.fillStyle='#a89164'; ctx.fillRect(X+s*0.1,Y-s*0.3,s*0.45,s*0.6);          // стены (тень)
+  ctx.beginPath(); ctx.moveTo(X-s*0.7,Y-s*0.28); ctx.lineTo(X,Y-s*0.95); ctx.lineTo(X+s*0.7,Y-s*0.28); ctx.closePath();
+  ctx.fillStyle=cap?'#9a4a34':'#8a6a3c'; ctx.fill();                            // крыша (у столицы — черепица)
+  ctx.beginPath(); ctx.moveTo(X-s*0.7,Y-s*0.28); ctx.lineTo(X,Y-s*0.95); ctx.lineTo(X+s*0.12,Y-s*0.84);
+  ctx.lineTo(X-s*0.52,Y-s*0.22); ctx.closePath(); ctx.fillStyle='rgba(255,240,210,0.28)'; ctx.fill();   // блик ската
+  ctx.strokeStyle='rgba(60,44,26,0.6)'; ctx.lineWidth=1; ctx.strokeRect(X-s*0.55,Y-s*0.3,s*1.1,s*0.6);
+  if(cap){ ctx.strokeStyle='#5a3c20'; ctx.lineWidth=1.4; ctx.beginPath(); ctx.moveTo(X,Y-s*0.95); ctx.lineTo(X,Y-s*1.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(X,Y-s*1.5); ctx.lineTo(X+s*0.5,Y-s*1.38); ctx.lineTo(X,Y-s*1.26); ctx.closePath();
+    ctx.fillStyle='#c8452e'; ctx.fill(); } };}
+
+const inView=(x,z,m=3)=>Math.abs(x-CX)<RAD+m&&Math.abs(z-CZ)<RAD+m;
+D.hexes.forEach((h,i)=>{ if(!inView(h.x,h.z)) return;
+  if(h.b===6){ const s=S*(1.35+rr(i)*0.7);
+    sprites.push({y:sy(h.z),d:mountain(sx(h.x)+S*(rr(i+1)-0.5)*0.8,sy(h.z),s,h.y>2.0,rr(i+11))});
+    if(rr(i+7)>0.72) sprites.push({y:sy(h.z)+3,d:mountain(sx(h.x)+S*1.0*(rr(i+3)-0.5)*2,sy(h.z)+S*0.55,s*0.5,false,rr(i+13))}); }
+  else if(h.b===5){ for(let k=0;k<2;k++) sprites.push({y:sy(h.z)+k,d:hill(sx(h.x)+S*(rr(i+k*5)-0.5)*1.6,sy(h.z)+S*(rr(i+k*9)-0.5)*1.1,S*(0.55+rr(i+k)*0.35))}); }
+  else if(h.b===2){ const n=6+Math.floor(rr(i)*4);
+    for(let k=0;k<n;k++){ const a=rr(i*13+k)*6.283, rd=Math.sqrt(rr(i*29+k))*1.6;
+      const tx=h.x+Math.cos(a)*rd, tz=h.z+Math.sin(a)*rd; if(h.rv&&rd<0.7) continue;
+      sprites.push({y:sy(tz),d:tree(sx(tx),sy(tz),S*(0.5+rr(i*31+k)*0.28),rr(i*37+k))}); } }
+  else if(h.b===3){ for(let k=0;k<2;k++) sprites.push({y:sy(h.z),d:tree(sx(h.x)+S*(rr(i+k*3)-0.5)*2,sy(h.z)+S*(rr(i+k*11)-0.5)*1.4,S*0.3,0.15)}); }
+});
+D.lm.forEach((l,li)=>{ if(!inView(l.x,l.z)) return;
+  const n=l.cap?6:Math.max(2,Math.min(5,1+Math.round(l.size||1)));
+  for(let k=0;k<n;k++){ const a=rr(li*7+k)*6.283, rd=(k? 0.45+Math.sqrt(rr(li*17+k))*0.85 : 0);
+    const hx=l.x+Math.cos(a)*rd, hz=l.z+Math.sin(a)*rd;
+    sprites.push({y:sy(hz)+(k?0:2),d:house(sx(hx),sy(hz),S*(k?0.62:0.85),l.cap&&k===0)}); }});
+sprites.sort((a,b)=>a.y-b.y).forEach(s=>s.d());
+
+// ---------- слой 3: «бумага» — зерно, виньетка, лёгкая тёплая тонировка ----------
+const g2=ctx.createRadialGradient(W/2,H/2,H*0.35,W/2,H/2,H*0.85);
+g2.addColorStop(0,'rgba(0,0,0,0)'); g2.addColorStop(1,'rgba(20,16,8,0.22)');
+ctx.fillStyle=g2; ctx.fillRect(0,0,W,H);
+ctx.fillStyle='rgba(255,226,170,0.045)'; ctx.fillRect(0,0,W,H);
+const gr=ctx.createImageData(W,H); const gp=gr.data;                    // зерно
+for(let o=0;o<gp.length;o+=4){ const v=(hash(o%W,(o/4/W)|0)-0.5)*14; gp[o]=gp[o+1]=gp[o+2]=128+v; gp[o+3]=14; }
+const tmp=document.createElement('canvas'); tmp.width=W; tmp.height=H;
+tmp.getContext('2d').putImageData(gr,0,0); ctx.drawImage(tmp,0,0);
+
+window.__ready=true;
+})();
+</script></body></html>
