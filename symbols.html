@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grad · условные значки поселений (рисуются кодом)</title>
+<style>
+  :root{ --sky:#dbe8f2; --panel:#ffffff; --ink:#20303a; --muted:#5b6b76; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#eef3f0;color:var(--ink);
+       padding:28px 16px 60px;display:flex;flex-direction:column;align-items:center}
+  h1{margin:0 0 6px;font-size:24px}
+  .lead{max-width:760px;text-align:center;color:var(--muted);margin:0 0 8px;line-height:1.5}
+  .why{max-width:760px;margin:6px 0 26px;font-size:13.5px;color:#3a4d57;background:#eaf3ec;border:1px solid #cfe3d4;
+       border-radius:10px;padding:10px 14px;line-height:1.5}
+  .why b{color:#256b3b}
+  .grid{display:grid;grid-template-columns:120px repeat(4,1fr);gap:10px;width:100%;max-width:900px}
+  .hcell{align-self:end;text-align:center;font-weight:600;color:var(--muted);font-size:13px;padding-bottom:4px}
+  .rlabel{display:flex;flex-direction:column;justify-content:center;padding-right:6px}
+  .rlabel b{font-size:15px}
+  .rlabel span{font-size:11.5px;color:var(--muted);margin-top:2px;line-height:1.35}
+  .cell{background:linear-gradient(#e9f2fb 0%,#e9f2fb 55%,#e7efe0 55%,#dfeacf 100%);
+        border:1px solid #d5dee6;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px #0001}
+  .cell.fut{background:linear-gradient(#243056 0%,#243056 52%,#1c2647 52%,#161f3a 100%);border-color:#2c3a63}
+  svg.ico{display:block;width:100%;height:auto}
+  .maptitle{margin:34px 0 8px;font-weight:600;color:var(--muted)}
+  .mapwrap{width:100%;max-width:900px;background:#cfe3b8;border:1px solid #b7d19a;border-radius:14px;overflow:hidden;box-shadow:0 2px 8px #0002}
+  .mapwrap svg{display:block;width:100%;height:auto}
+  .back{position:fixed;top:14px;right:16px;background:#fff;border:1px solid #cdd7de;border-radius:8px;
+        padding:6px 12px;text-decoration:none;color:#334;font-size:13px;box-shadow:0 1px 4px #0002}
+</style>
+</head>
+<body>
+<a class="back" href="index.html">← к списку</a>
+<h1>Условные значки поселений — рисуются кодом</h1>
+<p class="lead">Альтернатива скачанным 3D-моделям: каждое поселение — чистый векторный значок (SVG), нарисованный прямо в браузере. Стиль меняется по эпохам, значок «растёт» вместе с городом.</p>
+<div class="why">
+  Почему это может быть лучше 3D-моделей: <b>единый стиль</b> (всё рисует один код, ничего не «не подходит» друг к другу) · <b>вес почти ноль</b> (нет гигабайтов моделей — карта хоть всего мира) · <b>бесконечный зум</b> без размытия · легко <b>перекрасить</b> (фракции, времена года) и <b>анимировать</b> (дым, неон, флаги) · мгновенно добавить новый тип. Ниже — 4 эпохи × 4 стадии роста, и как это читается на карте.
+</div>
+<div class="grid" id="grid"></div>
+
+<div class="maptitle">↓ как значки читаются на карте (дороги, разные эпохи и размеры рядом)</div>
+<div class="mapwrap"><svg id="map" viewBox="0 0 900 240"></svg></div>
+
+<script>
+const gy = 84;                 // «земля» в ячейке
+const PRE = {hide:'#bd8c5c',hideD:'#996c40',pole:'#5c4224'};
+const MED = {wall:'#e7d6b0',wallD:'#cbb686',roof:'#bd4a30',roofD:'#8d3620',timber:'#6b4a2f',door:'#4a3423',flag:'#cc3a30',glass:'#ffffff85'};
+const MOD = {wall:'#d6dce2',wallD:'#bcc6ce',glass:'#8dbadf',accent:'#3f8fd0',dark:'#5e6d79',door:'#5e6d7955'};
+const FUT = {body:'#2f3960',bodyD:'#1f274a',neon:'#41ecff',neon2:'#ff5cd8',glass:'#0e1830'};
+
+const n = v => (Math.round(v*10)/10);
+
+/* ---------- кирпичики ---------- */
+function tent(cx,w,h,C){
+  const x1=cx-w/2, x2=cx+w/2, ay=gy-h;
+  return `<polygon points="${x1},${gy} ${cx},${ay} ${x2},${gy}" fill="${C.hide}"/>`
+    +`<polygon points="${cx},${ay} ${x2},${gy} ${cx},${gy}" fill="${C.hideD}"/>`
+    +`<line x1="${cx-2}" y1="${ay-3}" x2="${cx+1.6}" y2="${ay+1}" stroke="${C.pole}" stroke-width="0.9"/>`
+    +`<line x1="${cx+2}" y1="${ay-3}" x2="${cx-1.6}" y2="${ay+1}" stroke="${C.pole}" stroke-width="0.9"/>`
+    +`<polygon points="${n(cx-w*0.15)},${gy} ${cx},${n(gy-h*0.42)} ${n(cx+w*0.15)},${gy}" fill="#33220f90"/>`;
+}
+function fire(cx){
+  const y=gy;
+  return `<line x1="${cx-3}" y1="${y}" x2="${cx+3}" y2="${y-1}" stroke="#6e4a2b" stroke-width="1.3"/>`
+    +`<line x1="${cx-3}" y1="${y-1}" x2="${cx+3}" y2="${y}" stroke="#563a20" stroke-width="1.3"/>`
+    +`<polygon points="${cx-2.4},${y-1} ${cx},${y-7} ${cx+2.4},${y-1}" fill="#f0872a"/>`
+    +`<polygon points="${cx-1.2},${y-1} ${cx},${y-4.5} ${cx+1.2},${y-1}" fill="#ffd24a"/>`;
+}
+function house(cx,w,h,roofH,C,{door=true,win=false}={}){
+  const x=cx-w/2, y=gy-h, ov=w*0.15;
+  let s=`<rect x="${n(x)}" y="${n(y)}" width="${w}" height="${h}" fill="${C.wall}"/>`
+    +`<rect x="${n(x+w*0.64)}" y="${n(y)}" width="${n(w*0.36)}" height="${h}" fill="${C.wallD}"/>`
+    +`<polygon points="${n(x-ov)},${n(y)} ${cx},${n(y-roofH)} ${n(x+w+ov)},${n(y)}" fill="${C.roof}"/>`
+    +`<polygon points="${cx},${n(y-roofH)} ${n(x+w+ov)},${n(y)} ${cx},${n(y)}" fill="${C.roofD}"/>`;
+  if(C.timber) s+=`<line x1="${cx}" y1="${n(y)}" x2="${cx}" y2="${gy}" stroke="${C.timber}" stroke-width="0.6"/>`
+    +`<line x1="${n(x)}" y1="${n(y+h*0.5)}" x2="${n(x+w)}" y2="${n(y+h*0.5)}" stroke="${C.timber}" stroke-width="0.5"/>`;
+  if(win){ s+=`<rect x="${n(cx-w*0.34)}" y="${n(y+h*0.2)}" width="${n(w*0.18)}" height="${n(h*0.24)}" fill="${C.glass}"/>`
+    +`<rect x="${n(cx+w*0.16)}" y="${n(y+h*0.2)}" width="${n(w*0.18)}" height="${n(h*0.24)}" fill="${C.glass}"/>`; }
+  if(door) s+=`<rect x="${n(cx-w*0.1)}" y="${n(gy-h*0.42)}" width="${n(w*0.2)}" height="${n(h*0.42)}" rx="0.6" fill="${C.door}"/>`;
+  return s;
+}
+function tower(cx,w,h,C){
+  const x=cx-w/2, y=gy-h;
+  let s=`<rect x="${n(x)}" y="${n(y)}" width="${w}" height="${h}" fill="${C.wall}"/>`
+    +`<rect x="${n(x+w*0.62)}" y="${n(y)}" width="${n(w*0.38)}" height="${h}" fill="${C.wallD}"/>`;
+  for(let i=0;i<3;i++) s+=`<rect x="${n(x+i*(w/3))}" y="${n(y-2.4)}" width="${n(w/3*0.66)}" height="2.6" fill="${C.wallD}"/>`;
+  s+=`<path d="M ${n(cx-w*0.17)} ${gy} v ${n(-h*0.4)} a ${n(w*0.17)} ${n(w*0.17)} 0 0 1 ${n(w*0.34)} 0 v ${n(h*0.4)} Z" fill="${C.door}"/>`;
+  s+=`<line x1="${cx}" y1="${n(y-2.4)}" x2="${cx}" y2="${n(y-10)}" stroke="${C.timber}" stroke-width="0.8"/>`
+    +`<polygon points="${cx},${n(y-10)} ${n(cx+7)},${n(y-8.3)} ${cx},${n(y-6.6)}" fill="${C.flag}"/>`;
+  return s;
+}
+function palisade(x1,x2){
+  let s='';
+  for(let x=x1;x<=x2;x+=3){ s+=`<polygon points="${x},${gy} ${n(x+1.4)},${gy-5} ${n(x+2.8)},${gy}" fill="#7c5a34"/>`; }
+  return s;
+}
+function block(cx,w,h,C,{antenna=false}={}){
+  const x=cx-w/2, y=gy-h;
+  let s=`<rect x="${n(x)}" y="${n(y)}" width="${w}" height="${h}" fill="${C.wall}"/>`
+    +`<rect x="${n(x+w*0.66)}" y="${n(y)}" width="${n(w*0.34)}" height="${h}" fill="${C.wallD}"/>`;
+  const cols=Math.max(2,Math.round(w/4.2)), rows=Math.max(2,Math.round(h/4.6));
+  const gw=w*0.14, gh=h*0.5/rows;
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const wx=x+w*0.14+c*(w*0.72/(cols-1||1))-gw/2;
+    const wy=y+h*0.16+r*(h*0.62/(rows-1||1));
+    s+=`<rect x="${n(wx)}" y="${n(wy)}" width="${n(gw)}" height="${n(gh)}" fill="${C.glass}"/>`;
+  }
+  if(antenna) s+=`<line x1="${cx}" y1="${n(y)}" x2="${cx}" y2="${n(y-8)}" stroke="${C.dark}" stroke-width="0.8"/>`
+    +`<circle cx="${cx}" cy="${n(y-8)}" r="1.1" fill="${C.accent}"/>`;
+  return s;
+}
+function ftower(cx,w,h,C,{alt=false}={}){
+  const y=gy-h, tw=w*0.58, x=cx-w/2, nc=alt?C.neon2:C.neon;
+  let s=`<polygon points="${n(x)},${gy} ${n(cx-tw/2)},${n(y)} ${n(cx+tw/2)},${n(y)} ${n(x+w)},${gy}" fill="${C.body}"/>`
+    +`<polygon points="${cx},${gy} ${cx},${n(y)} ${n(cx+tw/2)},${n(y)} ${n(x+w)},${gy}" fill="${C.bodyD}"/>`;
+  s+=`<line x1="${cx}" y1="${n(y+1)}" x2="${cx}" y2="${gy-1}" stroke="${nc}" stroke-width="0.9" filter="url(#glow)"/>`;
+  const rows=Math.max(3,Math.round(h/6));
+  for(let r=0;r<rows;r++){ const wy=y+3+r*(h-6)/(rows-1);
+    s+=`<circle cx="${n(cx-tw*0.28)}" cy="${n(wy)}" r="0.8" fill="${nc}" filter="url(#glow)"/>`
+      +`<circle cx="${n(cx+tw*0.28)}" cy="${n(wy)}" r="0.8" fill="${nc}" filter="url(#glow)"/>`; }
+  s+=`<circle cx="${cx}" cy="${n(y-0.5)}" r="1.5" fill="${nc}" filter="url(#glow)"/>`;
+  return s;
+}
+function dome(cx,w,C){
+  const r=w/2;
+  return `<path d="M ${n(cx-r)} ${gy} A ${r} ${r} 0 0 1 ${n(cx+r)} ${gy} Z" fill="${C.body}"/>`
+    +`<path d="M ${n(cx-r)} ${gy} A ${r} ${r} 0 0 1 ${n(cx+r)} ${gy}" fill="none" stroke="${C.neon}" stroke-width="0.8" filter="url(#glow)"/>`
+    +`<line x1="${cx}" y1="${n(gy-r*0.7)}" x2="${cx}" y2="${gy}" stroke="${C.neon}" stroke-width="0.4" opacity="0.7"/>`;
+}
+function pad(fut){
+  const g = fut?'#37507a':'#a9c47f', gd = fut?'#2a3d5e':'#cdb98a';
+  return `<ellipse cx="60" cy="88" rx="55" ry="8.5" fill="${g}"/><ellipse cx="60" cy="86.5" rx="40" ry="5.5" fill="${gd}"/>`;
+}
+
+/* ---------- сцены: epoch × size(1..4) ---------- */
+function scene(epoch,sz){
+  if(epoch==='prehistoric'){
+    if(sz===1) return tent(60,26,25,PRE)+fire(80);
+    if(sz===2) return tent(47,23,22,PRE)+tent(72,25,24,PRE)+fire(60);
+    if(sz===3) return tent(38,21,20,PRE)+tent(80,21,20,PRE)+tent(59,26,25,PRE)+fire(68);
+    return tent(30,19,18,PRE)+tent(90,19,18,PRE)+tent(50,23,22,PRE)+tent(74,23,22,PRE)+tent(60,15,14,PRE)+fire(42);
+  }
+  if(epoch==='medieval'){
+    if(sz===1) return house(60,22,15,10,MED,{win:true});
+    if(sz===2) return house(45,20,14,9,MED)+house(74,23,16,10,MED,{win:true});
+    if(sz===3) return house(36,18,12,8,MED)+house(84,18,12,8,MED)+tower(60,15,26,MED);
+    return palisade(20,100)+house(34,17,12,8,MED)+house(88,17,12,8,MED)+house(50,16,11,7,MED)+tower(66,17,30,MED);
+  }
+  if(epoch==='modern'){
+    if(sz===1) return block(60,22,16,MOD);
+    if(sz===2) return block(45,20,15,MOD)+block(74,23,20,MOD);
+    if(sz===3) return block(36,20,15,MOD)+block(84,20,16,MOD)+block(60,17,30,MOD,{antenna:true});
+    return block(30,16,14,MOD)+block(90,16,15,MOD)+block(47,17,22,MOD)+block(74,17,26,MOD)+block(60,15,38,MOD,{antenna:true});
+  }
+  /* future */
+  if(sz===1) return ftower(60,20,30,FUT);
+  if(sz===2) return ftower(46,17,26,FUT)+ftower(72,20,36,FUT,{alt:true});
+  if(sz===3) return ftower(34,14,28,FUT)+ftower(58,20,42,FUT)+ftower(80,15,30,FUT,{alt:true})+dome(95,12,FUT);
+  return ftower(28,13,26,FUT)+ftower(46,15,34,FUT,{alt:true})+ftower(63,18,46,FUT)+ftower(82,15,32,FUT)
+       +`<line x1="46" y1="52" x2="63" y2="42" stroke="${FUT.neon}" stroke-width="0.8" filter="url(#glow)"/>`
+       +dome(93,12,FUT);
+}
+
+const GLOW = `<defs><filter id="glow" x="-60%" y="-60%" width="220%" height="220%">`
+  +`<feGaussianBlur stdDeviation="1.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>`;
+
+const EPOCHS=[
+  {key:'prehistoric',name:'Первобыт',note:'стоянки, шкуры, костёр'},
+  {key:'medieval',name:'Средневековье',note:'дворы, черепица, донжон с флагом'},
+  {key:'modern',name:'Современность',note:'кварталы, стекло, антенны'},
+  {key:'future',name:'Будущее',note:'сужающиеся башни, неон, купол'},
+];
+const SIZES=['Зарождение','Деревня','Город','Столица'];
+
+const grid=document.getElementById('grid');
+grid.insertAdjacentHTML('beforeend', `<div></div>`+SIZES.map(s=>`<div class="hcell">${s}</div>`).join(''));
+for(const e of EPOCHS){
+  grid.insertAdjacentHTML('beforeend', `<div class="rlabel"><b>${e.name}</b><span>${e.note}</span></div>`);
+  for(let sz=1;sz<=4;sz++){
+    const futCls = e.key==='future' ? ' fut':'';
+    grid.insertAdjacentHTML('beforeend',
+      `<div class="cell${futCls}"><svg class="ico" viewBox="0 0 120 100">${GLOW}${pad(e.key==='future')}${scene(e.key,sz)}</svg></div>`);
+  }
+}
+
+/* ---------- мини-карта ---------- */
+function placeOn(mx,my,inner){ return `<g transform="translate(${mx-60},${my-88}) scale(1)">${inner}</g>`; }
+const map=document.getElementById('map');
+let m = GLOW;
+// холмики фона
+m+=`<ellipse cx="180" cy="70" rx="150" ry="55" fill="#c1dba6"/>`
+ +`<ellipse cx="700" cy="60" rx="180" ry="60" fill="#bcd79f"/>`
+ +`<ellipse cx="470" cy="200" rx="260" ry="80" fill="#c6dfab"/>`;
+// река
+m+=`<path d="M -20 150 C 150 120 260 190 420 160 S 720 120 920 175" fill="none" stroke="#8fc4d8" stroke-width="12" opacity="0.85"/>`;
+// дороги (протоптанные тропы)
+m+=`<g stroke="#cdb07e" stroke-width="7" fill="none" stroke-linecap="round" opacity="0.9">`
+ +`<path d="M 150 150 Q 300 120 430 150"/>`
+ +`<path d="M 430 150 Q 560 175 690 130"/>`
+ +`<path d="M 430 150 Q 470 210 560 215"/>`
+ +`</g>`;
+// поселения разных эпох/размеров на карте
+const spots=[
+  {x:150,y:150,e:'prehistoric',s:2},
+  {x:430,y:150,e:'medieval',s:4},
+  {x:690,y:130,e:'modern',s:3},
+  {x:560,y:215,e:'medieval',s:1},
+  {x:250,y:205,e:'prehistoric',s:1},
+  {x:790,y:200,e:'future',s:3},
+];
+for(const sp of spots){
+  const fut=sp.e==='future';
+  const g = fut?'#5f7ba0':'#b6cf94', gd = fut?'#46608a':'#c9b686';
+  const inner = `<ellipse cx="60" cy="88" rx="50" ry="8" fill="${g}"/><ellipse cx="60" cy="86.5" rx="36" ry="5" fill="${gd}"/>`+scene(sp.e,sp.s);
+  m+=placeOn(sp.x,sp.y,inner);
+}
+map.innerHTML=m;
+</script>
+</body>
+</html>
