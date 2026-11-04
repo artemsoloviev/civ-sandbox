@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8"><meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Советники — раскладка дерева</title>
+<style>
+  :root{
+    --bg:#0b1119; --panel:#12233a; --panel2:#0d1826; --gold:#f4cd7e; --text:#eaf1fb; --sub:#9fb0c6;
+    --mudr:#5aa9e6; --sham:#b07de0; --sud:#f4cd7e; --voe:#e3644f; --kaz:#5ecb84;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(120% 120% at 50% 0%,#1c2c44 0%,#0f1726 55%,var(--bg) 100%);
+    color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;padding:28px 18px 60px}
+  h1{font-family:Georgia,serif;text-align:center;font-size:clamp(24px,4vw,38px);letter-spacing:2px;
+    color:var(--gold);margin:0 0 4px;text-shadow:0 2px 14px #f4cd7e33}
+  .sub{text-align:center;color:var(--sub);font-size:13px;margin-bottom:28px;letter-spacing:.5px}
+  .wrap{max-width:1180px;margin:0 auto}
+
+  /* сводная шкала баланса */
+  .balance{background:var(--panel);border:1px solid #ffffff14;border-radius:16px;padding:18px 20px;margin-bottom:26px}
+  .balance h2{margin:0 0 14px;font-size:14px;color:var(--sub);font-weight:600;text-transform:uppercase;letter-spacing:1px}
+  .brow{display:flex;align-items:center;gap:12px;margin:8px 0;font-size:13.5px}
+  .brow .nm{width:150px;flex-shrink:0;font-weight:700}
+  .brow .bar-bg{flex:1;background:#00000040;border-radius:8px;overflow:hidden;height:22px;position:relative}
+  .brow .bar{height:100%;border-radius:8px 0 0 8px;display:flex;align-items:center;justify-content:flex-end;
+    padding-right:8px;color:#0b1119;font-weight:800;font-size:12px;white-space:nowrap;transition:width .3s}
+  .brow .cnt{width:70px;text-align:right;color:var(--sub);flex-shrink:0}
+
+  /* легенда */
+  .legend{display:flex;flex-wrap:wrap;gap:10px 18px;justify-content:center;margin-bottom:24px;font-size:13px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  /* таблица по эпохам */
+  .era{margin-bottom:18px}
+  .era h3{font-family:Georgia,serif;font-size:16px;color:var(--gold);margin:0 0 8px;padding-left:2px;
+    border-left:3px solid var(--gold);padding-left:10px}
+  .grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  @media (max-width:900px){.grid5{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:520px){.grid5{grid-template-columns:1fr}}
+  .col{background:var(--panel2);border-radius:12px;padding:10px 10px 12px;border-top:3px solid transparent;min-height:34px}
+  .col.mudr{border-color:var(--mudr)} .col.sham{border-color:var(--sham)} .col.sud{border-color:var(--sud)}
+  .col.voe{border-color:var(--voe)} .col.kaz{border-color:var(--kaz)}
+  .col .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--sub);margin-bottom:6px}
+  .chip{display:inline-block;background:#ffffff0f;border:1px solid #ffffff1c;border-radius:7px;
+    padding:3px 8px;font-size:12px;margin:2px 3px 0 0;line-height:1.35}
+  .chip.star{border-color:var(--gold);background:#f4cd7e1c}
+  .empty{color:#5c6b82;font-size:12px;font-style:italic}
+
+  .note{max-width:1180px;margin:30px auto 0;background:var(--panel);border:1px solid #ffffff14;
+    border-radius:16px;padding:20px 22px;font-size:14px;line-height:1.6;color:#dbe6f5}
+  .note h2{margin:0 0 10px;color:var(--gold);font-size:16px;font-family:Georgia,serif}
+  .note ol{padding-left:20px;margin:10px 0 0}
+  .note code{background:#00000040;padding:1px 6px;border-radius:5px;font-size:12.5px}
+  .star-note{font-size:12px;color:var(--sub);margin-top:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>♔ Советники — черновая раскладка дерева</h1>
+  <div class="sub">138 узлов Civilization VI (77 технологий + 61 институт), рассортированы по 5 советникам · зафиксировано 2026-07-05</div>
+
+  <div class="balance">
+    <h2>Баланс по советникам</h2>
+    <div class="brow"><div class="nm" style="color:var(--mudr)">Мудрец</div>
+      <div class="bar-bg"><div class="bar" style="width:100%;background:var(--mudr)">54</div></div>
+      <div class="cnt">39%</div></div>
+    <div class="brow"><div class="nm" style="color:var(--voe)">Военачальник</div>
+      <div class="bar-bg"><div class="bar" style="width:59%;background:var(--voe)">32</div></div>
+      <div class="cnt">23%</div></div>
+    <div class="brow"><div class="nm" style="color:var(--sham)">Шаман</div>
+      <div class="bar-bg"><div class="bar" style="width:35%;background:var(--sham)">19</div></div>
+      <div class="cnt">14%</div></div>
+    <div class="brow"><div class="nm" style="color:var(--sud)">Судья</div>
+      <div class="bar-bg"><div class="bar" style="width:31%;background:var(--sud)">17</div></div>
+      <div class="cnt">12%</div></div>
+    <div class="brow"><div class="nm" style="color:var(--kaz)">Казначей</div>
+      <div class="bar-bg"><div class="bar" style="width:30%;background:var(--kaz)">16</div></div>
+      <div class="cnt">12%</div></div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:var(--mudr)"></i>Мудрец — наука/ремёсла</span>
+    <span><i style="background:var(--sham)"></i>Шаман — вера/культура</span>
+    <span><i style="background:var(--sud)"></i>Судья — законы/государство</span>
+    <span><i style="background:var(--voe)"></i>Военачальник — война</span>
+    <span><i style="background:var(--kaz)"></i>Казначей — казна/торговля</span>
+  </div>
+
+  <div id="eras"></div>
+
+  <div class="note">
+    <h2>Главная проблема раскладки — дисбаланс</h2>
+    Мудрецу досталось 54 узла из 138 (39%), остальным — по 16–32. Это не ошибка сортировки: в
+    самом дереве технологий Civ6 военные/экономические ответвления редкие, а «общая наука и
+    инженерия» — самый длинный ствол. Раз советник берёт весь этот ствол — он неизбежно выходит
+    крупнее остальных четырёх.
+    <ol>
+      <li>Оставить как есть — у Мудреца и в оригинальной Civ6 самое длинное дерево (77 против 61
+        у институтов), это не новая проблема, просто теперь видна по каждому советнику отдельно.</li>
+      <li>Урезать/объединить часть чисто инженерных узлов Мудреца — та самая задача «сократить
+        лишнее», которую озвучили в начале сессии — дисбаланс уменьшится вместе с общим числом узлов.</li>
+      <li>Забрать у Мудреца ещё одну тему (например, «инженерно-строительное») под нового 6-го
+        советника — но это снова увеличивает их число.</li>
+    </ol>
+    <div class="star-note">✨ — узел перенесён из своей исходной ветки Civ6 в другую (например,
+      «Дипломатическая служба» — из «законов» к Казначею, тематически ближе к посольствам/торговле).</div>
+  </div>
+</div>
+
+<script>
+const STAR = new Set(['Дипломатическая служба']);
+const ADV = {mudr:'Мудрец', sham:'Шаман', sud:'Судья', voe:'Военачальник', kaz:'Казначей'};
+const DATA = [
+["Древний мир", {
+  mudr:["Горное дело","Гончарное дело","Скотоводство","Мореплавание","Письменность","Ирригация","Каменная кладка","Колесо"],
+  voe:["Стрельба из лука","Обработка бронзы","Военные традиции"],
+  kaz:["Ремесленное дело","Зарубежная торговля","Государственная рабочая сила"],
+  sud:["Кодекс законов","Ранняя империя"],
+  sham:["Астрология","Мистицизм"]
+}],
+["Классика", {
+  mudr:["Небесная навигация","Кораблестроение","Математика","Строительство","Инженерное дело"],
+  voe:["Верховая езда","Обработка железа","Военная подготовка","Тактика обороны"],
+  kaz:["Денежное обращение"],
+  sud:["Политическая философия"],
+  sham:["Игры и отдых","Драма и поэзия","Летописи","Богословие"]
+}],
+["Средневековье", {
+  mudr:["Механика","Контрфорс","Образование"],
+  voe:["Военная тактика","Стремена","Военная инженерия","Замки","Морские традиции","Наёмники"],
+  kaz:["Ученичество","Средневековые ярмарки","Гильдии"],
+  sud:["Феодализм","Государственная служба"],
+  sham:["Божественное право"]
+}],
+["Ренессанс", {
+  mudr:["Картография","Массовое производство","Печатный станок","Прямое парусное вооружение","Астрономия","Литьё металла"],
+  voe:["Порох","Осадная тактика"],
+  kaz:["Банковское дело","Исследование мира","Дипломатическая служба","Меркантилизм"],
+  sud:["Просвещение"],
+  sham:["Гуманизм","Реформированная церковь"]
+}],
+["Индустриальная эпоха", {
+  mudr:["Индустриализация","Научная теория","Паровой двигатель","Санитария"],
+  voe:["Баллистика","Военная наука","Нарезное оружие","Выжженная земля"],
+  kaz:["Экономика","Колониализм"],
+  sud:["Гражданское строительство","Национализм","Урбанизация"],
+  sham:["Опера и балет","Естественная история"]
+}],
+["Новое время", {
+  mudr:["Авиация","Сменные детали","Сталь","Нефтепереработка","Электричество","Радио","Химия","Двигатель внутреннего сгорания"],
+  voe:["Мобилизация","Ядерная программа"],
+  kaz:["Капитализм"],
+  sud:["Идеология","Избирательное право","Тоталитаризм","Классовая борьба"],
+  sham:["Природоохрана","Средства массовой информации"]
+}],
+["Атомная эпоха", {
+  mudr:["Передовая авиация","Пластмасса","Компьютеры","Синтетические материалы","Космическая гонка"],
+  voe:["Ракетостроение","Продвинутая баллистика","Общевойсковой бой","Ядерное деление","Холодная война","Быстрое реагирование"],
+  kaz:[],
+  sud:[],
+  sham:["Профессиональный спорт","Культурное наследие"]
+}],
+["Информационная эпоха", {
+  mudr:["Телекоммуникации","Спутники","Композитные материалы","Робототехника","Нанотехнологии","Термоядерный синтез"],
+  voe:["Системы наведения","Лазеры","Технология малозаметности"],
+  kaz:["Глобализация","Корпоративный либертарианизм"],
+  sud:["Цифровая демократия","Синтетическая технократия","Управление ближайшего будущего"],
+  sham:["Социальные сети","Экологическое движение"]
+}],
+["Будущее", {
+  mudr:["Морские поселения","Продвинутый ИИ","Продвинутые аккумуляторы","Кибернетика","Умные материалы","Прогностические системы","Внеземная миссия","Технологии будущего","Императив исхода"],
+  voe:["Доктрина умной силы","Информационная война"],
+  kaz:[],
+  sud:["Институт будущего"],
+  sham:["Смягчение глобального потепления","Культурная гегемония"]
+}],
+];
+
+const host = document.getElementById('eras');
+for(const [era, cols] of DATA){
+  const wrap = document.createElement('div'); wrap.className='era';
+  const h = document.createElement('h3'); h.textContent = era; wrap.appendChild(h);
+  const grid = document.createElement('div'); grid.className='grid5';
+  for(const key of ['mudr','sham','sud','voe','kaz']){
+    const col = document.createElement('div'); col.className = 'col '+key;
+    const lbl = document.createElement('div'); lbl.className='lbl'; lbl.textContent = ADV[key];
+    col.appendChild(lbl);
+    const items = cols[key]||[];
+    if(!items.length){
+      const e = document.createElement('div'); e.className='empty'; e.textContent='—'; col.appendChild(e);
+    } else {
+      for(const name of items){
+        const c = document.createElement('span'); c.className = 'chip'+(STAR.has(name)?' star':'');
+        c.textContent = name + (STAR.has(name)?' ✨':'');
+        col.appendChild(c);
+      }
+    }
+    grid.appendChild(col);
+  }
+  wrap.appendChild(grid);
+  host.appendChild(wrap);
+}
+</script>
+</body>
+</html>
